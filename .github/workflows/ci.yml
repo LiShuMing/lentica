@@ -9,7 +9,7 @@ jobs:
       matrix:
         python: ['3.11', '3.12']
     env:
-      LENTICA_DATA_DIR: ${{ runner.temp }}/lentica-data
+      LENTICA_DATA_DIR: /tmp/lentica-ci-data
       LENTICA_QUEUE_ENABLED: 'false'
       LENTICA_ENABLE_FACES: 'false'
     steps:
