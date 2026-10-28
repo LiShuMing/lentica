@@ -1,0 +1,2 @@
+# Run from the repository root. Model runtimes are optional extras.
+-e .

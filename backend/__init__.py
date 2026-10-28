@@ -1,0 +1,1 @@
+"""Lentica backend package."""

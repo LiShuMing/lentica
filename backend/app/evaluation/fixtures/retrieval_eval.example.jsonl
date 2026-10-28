@@ -1,0 +1,3 @@
+# Copy this file outside Git, replace file IDs with confirmed relevant IDs, then run backend.app.evaluation.runner.
+{"query_id":"visual-001","query":"找一张海边夕阳的照片","relevant_asset_ids":[123],"category":"visual"}
+{"query_id":"ocr-001","query":"找写有 PagedAttention 的白板照片","relevant_asset_ids":[456],"category":"ocr"}
