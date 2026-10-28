@@ -1,0 +1,59 @@
+schema_version = 1
+project = "lentica"
+spec = "specs/0001-agentic-workspace"
+
+[[components]]
+id = "backend"
+path = "backend"
+kind = "product"
+access = "local"
+spec = "specs/0001-agentic-workspace"
+check = "python -m pytest backend/tests"
+
+[[components]]
+id = "frontend"
+path = "frontend"
+kind = "product"
+access = "local"
+spec = "specs/0001-agentic-workspace"
+check = "npm --prefix frontend run build"
+
+[[components]]
+id = "media-workflow"
+path = "apps/media-workflow"
+kind = "app"
+access = "remote-opt-in"
+spec = "specs/0001-agentic-workspace"
+check = "python -m pytest apps/media-workflow/tests"
+
+[[components]]
+id = "multimodal-agent"
+path = "examples/multimodal-agent"
+kind = "example"
+access = "gui-remote-opt-in"
+spec = "specs/0001-agentic-workspace"
+check = "python -m pytest examples/multimodal-agent/tests"
+
+[[components]]
+id = "vllm"
+path = "services/vllm"
+kind = "service"
+access = "gpu-opt-in"
+spec = "specs/0001-agentic-workspace"
+check = "python services/vllm/scripts/service.py plan"
+
+[[components]]
+id = "gpu"
+path = "labs/gpu"
+kind = "lab"
+access = "gpu-opt-in"
+spec = "specs/0001-agentic-workspace"
+check = "python scripts/check_workspace.py"
+
+[[components]]
+id = "gpu-llm"
+path = "learning/gpu-llm"
+kind = "learning"
+access = "gpu-opt-in"
+spec = "specs/0001-agentic-workspace"
+check = "python -m pytest tests/test_learning.py"

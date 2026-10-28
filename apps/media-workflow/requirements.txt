@@ -1,0 +1,2 @@
+python-dotenv>=1,<2
+# Tests: pytest>=8,<10. Official Node CLI is provisioned separately.

@@ -1,0 +1,513 @@
+[
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "ARCHITECTURE.md",
+    "destination": "apps/media-workflow/ARCHITECTURE.md",
+    "source_sha256": "cf6f6ae0f38a8d9a97dabb788814caa7ad68c7eda890d7608cacc58dc702d932",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "README.md",
+    "destination": "apps/media-workflow/README.md",
+    "source_sha256": "1cfad4e9ddf60287781328962c2d1e9e5afbf8df10d15f3dda044f8c9968549f",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "media",
+    "destination": "apps/media-workflow/media",
+    "source_sha256": "4e39cc33a2ab00178764d5808163aa8bec999639b3076c1e236eb3a22026110f",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "media.py",
+    "destination": "apps/media-workflow/media.py",
+    "source_sha256": "7031e7015b974ae38e35a5774806a4c2256cf07296245a77cb0902ae5046cc83",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "skills/bailian-media/SKILL.md",
+    "destination": "apps/media-workflow/skills/bailian-media/SKILL.md",
+    "source_sha256": "1e05ae34d557efddb6d7f70285574da39a4ecaa178cae4fa7c95ced28a032774",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "bailian-media-workflow",
+    "source_path": "test_media.py",
+    "destination": "apps/media-workflow/tests/test_media.py",
+    "source_sha256": "980629fbd6875ad85e79c149efb2e4b9daeb1248f60362714f8b330ba2de2fc4",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "README.md",
+    "destination": "labs/gpu/README.md",
+    "source_sha256": "f034d7fe01be75bb36c27d7e42c6414f8745a8c3128d11031d8ad79349a61e86",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "docs/00-roadmap.md",
+    "destination": "labs/gpu/docs/00-roadmap.md",
+    "source_sha256": "8fced28242eee471ed25bc8ddd5f90b7e2b36e795dba4e73051b2b83ad3178eb",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "docs/01-amd-stack.md",
+    "destination": "labs/gpu/docs/01-amd-stack.md",
+    "source_sha256": "2bfc8a8c8bf7c2ab274633f4a0fe33e5c38dcb0cc679c0beb84b13422fc8a946",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "docs/02-lab-notes.md",
+    "destination": "labs/gpu/docs/02-lab-notes.md",
+    "source_sha256": "bf31c274183668d400da59743042ffd5991be4a9464e95d91fd7ec5428bccfea",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "hip/01-vector-add/README.md",
+    "destination": "labs/gpu/hip/01-vector-add/README.md",
+    "source_sha256": "f228d032409c0dc6d66c5fdacfa85ebb4ecace6a183e2bc3dec892b983a42fc1",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "hip/01-vector-add/vector_add.cpp",
+    "destination": "labs/gpu/hip/01-vector-add/vector_add.cpp",
+    "source_sha256": "0b7112e5104e6be830f4d9eacf3fd674d66c58880f373d6a72056969d449436b",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/01-torch-directml/README.md",
+    "destination": "labs/gpu/python/01-torch-directml/README.md",
+    "source_sha256": "c4611d303f5fdca4d18c99ef4f5414a714a35b617bdf3b9e4bede88b8eb4fe5f",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/01-torch-directml/benchmark.py",
+    "destination": "labs/gpu/python/01-torch-directml/benchmark.py",
+    "source_sha256": "7e9487aec752c08d7131e7c9fb0cb822eaf9429dbf34179754ca604934d5b094",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/02-rocm-check/README.md",
+    "destination": "labs/gpu/python/02-rocm-check/README.md",
+    "source_sha256": "90c04a5da47d9d87a4d4e509d8075587a4e2eb3dc41573a104885241a67c03c4",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/02-rocm-check/check_rocm.py",
+    "destination": "labs/gpu/python/02-rocm-check/check_rocm.py",
+    "source_sha256": "338dcf8cb11f997691ca732e51b70ffcf9ca201f377346dbace5a82f281fbea3",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/README.md",
+    "destination": "labs/gpu/python/03-cuda-learning/README.md",
+    "source_sha256": "c048c673a2394c89dc39933493fd19508260246a280fa79a54e5f1df63901b0e",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/activate.sh",
+    "destination": "labs/gpu/python/03-cuda-learning/activate.sh",
+    "source_sha256": "0a9412e4d86ced8de4e6c4c69a5836a00a5fcedab6c84d112430400d36ecc80d",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/notebooks/00_numpy_pandas.ipynb",
+    "destination": "labs/gpu/python/03-cuda-learning/notebooks/00-numpy-pandas.ipynb",
+    "source_sha256": "5e8deaaa314d668d1624281fb0bc1bdca883eff3daa4658c5eb24f0c001d3d2c",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/notebooks/01_cuda_basics.ipynb",
+    "destination": "labs/gpu/python/03-cuda-learning/notebooks/01-cuda-basics.ipynb",
+    "source_sha256": "c0a27d82e58545f4a4b42970b33886dfa6e7d43d9867f5378c5f23288327b53c",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/requirements-torch.txt",
+    "destination": "labs/gpu/python/03-cuda-learning/requirements-torch.txt",
+    "source_sha256": "59c93951e1c8c1f2f57039108160c2e4d1093b4ae39360e8691f3d3c99deba82",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/requirements.txt",
+    "destination": "labs/gpu/python/03-cuda-learning/requirements.txt",
+    "source_sha256": "1fb806373750ef4c2beb4c83ba56d58521d1bd74d9689915d6ffdc3d57d3895b",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/scripts/check_cuda.py",
+    "destination": "labs/gpu/python/03-cuda-learning/scripts/check_cuda.py",
+    "source_sha256": "d4db5ffde2aff94ab06602bcfa89ec044267015469fd2d424c14e44bc22d814f",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/setup.sh",
+    "destination": "labs/gpu/python/03-cuda-learning/setup.sh",
+    "source_sha256": "be142db9e756f35dc6df656e0a2eb9c7dcc60302f6bf00d5d2e26eb8cd594cd7",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "python/03-cuda-learning/start-jupyter.sh",
+    "destination": "labs/gpu/python/03-cuda-learning/start-jupyter.sh",
+    "source_sha256": "1fb04b3da343c91742b5e5961b2498a905024317899f72551f052e79baff9a75",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "rust/01-wgpu-vector-add/Cargo.lock",
+    "destination": "labs/gpu/rust/01-wgpu-vector-add/Cargo.lock",
+    "source_sha256": "1dbad61aa30ac6d348135e48c92336501771a5cdad9704132797daef4f9d34ed",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "rust/01-wgpu-vector-add/Cargo.toml",
+    "destination": "labs/gpu/rust/01-wgpu-vector-add/Cargo.toml",
+    "source_sha256": "62bf0f6140b083010b51ebc6b30c22eefd5f6720d90483b14e25b70d3a24dc27",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "rust/01-wgpu-vector-add/README.md",
+    "destination": "labs/gpu/rust/01-wgpu-vector-add/README.md",
+    "source_sha256": "0f693c9881fa47a5daca60f299ae13d40a2ee949deaf76eb80b907c524e73705",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "rust/01-wgpu-vector-add/src/main.rs",
+    "destination": "labs/gpu/rust/01-wgpu-vector-add/src/main.rs",
+    "source_sha256": "835ab3e82800f96181eff7d2acb402ad5f895852101027f86c80d9fe54d8992d",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "rust/01-wgpu-vector-add/src/vector_add.wgsl",
+    "destination": "labs/gpu/rust/01-wgpu-vector-add/src/vector_add.wgsl",
+    "source_sha256": "be8065734e818046cc43016e68c125ade163081f03eda925e7d837449dc01699",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "shaders/wgsl/notes.md",
+    "destination": "labs/gpu/shaders/wgsl/notes.md",
+    "source_sha256": "5cbcb64c46269ec520c8597ba694e5cf37a267eb0e02df3a60ffd4954740b48f",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "tools/check-env.ps1",
+    "destination": "labs/gpu/tools/check-env.ps1",
+    "source_sha256": "26e14a21ea7634ec310fa224121df2f150b8b48f8dbdd3360599a67699eaa154",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-lab",
+    "source_path": "tools/run-wgpu-vector-add.ps1",
+    "destination": "labs/gpu/tools/run-wgpu-vector-add.ps1",
+    "source_sha256": "07ce427723ace9f0aa10771ac9ace2320b9d916860031a9a1ea9e39dbe9852c9",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "01-numpy-and-math.md",
+    "destination": "learning/gpu-llm/01-numpy-and-math.md",
+    "source_sha256": "38e285c4881d3590d88098af2caaec179edc432c825d078c8d61a1012635537b",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "02-pytorch-basics.md",
+    "destination": "learning/gpu-llm/02-pytorch-basics.md",
+    "source_sha256": "f6c15dffbf471939fd55cabf1533ea153df585862052c058ffd96ff01f8823c8",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "03-gpu-programming.md",
+    "destination": "learning/gpu-llm/03-gpu-programming.md",
+    "source_sha256": "4dc441bd9be56347eab210e8f14f3b9b2a93def1f16afe7e28ec07f1112c80af",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "04-deep-learning-core.md",
+    "destination": "learning/gpu-llm/04-deep-learning-core.md",
+    "source_sha256": "e9d799db6e9221623975ce494da3cacf85e58ed257459226db7272fe0f754d90",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "05-transformer-llm.md",
+    "destination": "learning/gpu-llm/05-transformer-llm.md",
+    "source_sha256": "4c63b673c70d5e8984f9a694f7527c47885620143bda0d622259a0662fea92d9",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "06-finetuning.md",
+    "destination": "learning/gpu-llm/06-finetuning.md",
+    "source_sha256": "0d320adcc78be4eebc35d08981271f45f6c31d0be17c3e44bfc16f2aa3a6b5d8",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "README.md",
+    "destination": "learning/gpu-llm/README.md",
+    "source_sha256": "0de2850101d077f69636fd9cb81912bc77ad1fe639d0ed5f45d33d7e2d3a787c",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter01/two_layer_mlp_numpy.py",
+    "destination": "learning/gpu-llm/experiments/chapter01/two_layer_mlp_numpy.py",
+    "source_sha256": "3b808bd7f77ec0a9526144b5064185a3ea2e8b769e8f71879b772ae1ceb5d8f0",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter02/Makefile",
+    "destination": "learning/gpu-llm/experiments/chapter02/Makefile",
+    "source_sha256": "0dca93adecaaadeec3eea51742c9382fb38d88ab06e192ad09ba73c5d9e43ef9",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter02/README.md",
+    "destination": "learning/gpu-llm/experiments/chapter02/README.md",
+    "source_sha256": "bb0baa308c7244c268405ec856cbb37acea4191f1cc34e8a9b2495e0f850efc2",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter02/compare_metrics.py",
+    "destination": "learning/gpu-llm/experiments/chapter02/compare_metrics.py",
+    "source_sha256": "0a0dfbf477802062bdc90402a664e0fdaa589012ddc1f87ebc4f6662993732cd",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter02/tensor_autograd_basics.py",
+    "destination": "learning/gpu-llm/experiments/chapter02/tensor_autograd_basics.py",
+    "source_sha256": "08a0bd5012ff582d446720e027bd1970930d397c90d93d177b5be64ff9042da2",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter02/train_digits.py",
+    "destination": "learning/gpu-llm/experiments/chapter02/train_digits.py",
+    "source_sha256": "f77035bb2bc159c8ac3173d1d2421f72d63105b5d45262633756c93efa42d727",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter03/Makefile",
+    "destination": "learning/gpu-llm/experiments/chapter03/Makefile",
+    "source_sha256": "10599d89b2d9cb72feb54485d05565ba8d7c24aa8f7e72fc7bae7127556e4e7a",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter03/README.md",
+    "destination": "learning/gpu-llm/experiments/chapter03/README.md",
+    "source_sha256": "5ecfaa301fe9ec431307a716232f9086874f96663cb5e753e8f064c646ec8463",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "experiments/chapter03/cuda_basics.cu",
+    "destination": "learning/gpu-llm/experiments/chapter03/cuda_basics.cu",
+    "source_sha256": "fda9c9585aa65843cb3527d7f089a1c75fcd4d0e73ff13479fb91d33ad22ed88",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/00_environment_check.ipynb",
+    "destination": "learning/gpu-llm/notebooks/00-environment-check.ipynb",
+    "source_sha256": "45ca0e05cae5cd2932cda438cafb416bba4dadeaaf838b71b17ca7cfdf38aba7",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/01_numpy_shape_broadcasting.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/01-numpy-shape-broadcasting.ipynb",
+    "source_sha256": "06265721a55e909cef8d18ff910f7666dc6cb81f9cf803f92ece5673ff7aa697",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/02_two_layer_mlp_backprop.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/02-two-layer-mlp-backprop.ipynb",
+    "source_sha256": "e7f04a85592f44d82f77df34fcee4d0e8e88b2b8c58cc0f386c417ce07ad02d8",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/Untitled.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/03-torch-scratch.ipynb",
+    "source_sha256": "c848620cd1d4797558596813213169049373f2447495c4dcd5561da4c2d1be69",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/Untitled1.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/04-scratch.ipynb",
+    "source_sha256": "bf19ce4b68bdbed7879a2e1d4ae1f510d50de83763607f80922872729c61b700",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/example1.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/05-numpy-experiment-01.ipynb",
+    "source_sha256": "4b9f689626240ee0ad99031d744a828dd7e97d9a1890a156351fcc5e1a3a3c67",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "notebooks/chapter01/example2.ipynb",
+    "destination": "learning/gpu-llm/notebooks/chapter01/06-numpy-experiment-02.ipynb",
+    "source_sha256": "6d3efb6e2f9bf54fa36b59044b59fbda22d30ac6f7fd9b2f7a029ee89bb3e3ef",
+    "notebook_outputs_removed": true
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "progress.md",
+    "destination": "learning/gpu-llm/progress.md",
+    "source_sha256": "6b14d75eff4d0c7c113ec2aa0fb0a7a8a3faf176dd57e59d900be06a26365f5d",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "requirements.txt",
+    "destination": "learning/gpu-llm/requirements.txt",
+    "source_sha256": "8bc640424f6ec2ef979ea1059e0455e476a8e8bf6786c0b498ec76503044c224",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "resources.md",
+    "destination": "learning/gpu-llm/resources.md",
+    "source_sha256": "819947563ff48fcca5666b190762ac8dcd7972992d81e449bbebc907a33a0012",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "scripts/check_env.sh",
+    "destination": "learning/gpu-llm/scripts/check_env.sh",
+    "source_sha256": "a1746f5e555ea155e9b2e92d94142ab3e84386d71ad4163b4994de6ff3b0cd9c",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "scripts/cuda_env.sh",
+    "destination": "learning/gpu-llm/scripts/cuda_env.sh",
+    "source_sha256": "1ce2ca4541323f0f4c68ad0ab92da764ab7bedb672bf309ae072199a6dc2f900",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "scripts/open_pkg_source.sh",
+    "destination": "learning/gpu-llm/scripts/open_pkg_source.sh",
+    "source_sha256": "ad15a2d93aab1413f4473f35c748ffae74bc02c61505dce94e880e07b2686061",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "gpu-llm-roadmap",
+    "source_path": "scripts/start_jupyter.sh",
+    "destination": "learning/gpu-llm/scripts/start_jupyter.sh",
+    "source_sha256": "aedd2a9cf92e8f999457969c8bd14d6773bb4bfb77f0595d1f240c5717c6d3e6",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "multimodal-agent",
+    "source_path": "README.md",
+    "destination": "examples/multimodal-agent/README.md",
+    "source_sha256": "90a7e2445e68a66cbd44c33fd2ca86548566eae80372df3e7373d5ae82d596d2",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "multimodal-agent",
+    "source_path": "agent.py",
+    "destination": "examples/multimodal-agent/agent.py",
+    "source_sha256": "7f42cd8ba4c8b2f873ed97ab23b3faa16390b022ca83c5500a70cf3d2a2eb00c",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "multimodal-agent",
+    "source_path": "image_analyzer.py",
+    "destination": "examples/multimodal-agent/image_analyzer.py",
+    "source_sha256": "60caa8913a5a4328ade657d2610f0b66e96310dcfa8b6472728199e6367499de",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "README.md",
+    "destination": "services/vllm/README.md",
+    "source_sha256": "f91bc640edc2062af6deba1d2009605295cf4cd3a75a38ceb412dd230027fcef",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "docs/install-notes.md",
+    "destination": "services/vllm/docs/install-notes.md",
+    "source_sha256": "858dad39a58934317599d26ebc3bca5cebbc1a55526158170adc7e6a5eaba76a",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "scripts/benchmark_qwen_vl.py",
+    "destination": "services/vllm/scripts/benchmark_qwen_vl.py",
+    "source_sha256": "c784a238dd2bca3bf40d68e3b2141d3e58c8ce908f740ba7a38fa75b765e0f1b",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "scripts/check_env.sh",
+    "destination": "services/vllm/scripts/check_env.sh",
+    "source_sha256": "12e8d1f08aab6fd8dd64b30bcd21f150fda1e51567f504b618376a1d9884d679",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "scripts/health_check.sh",
+    "destination": "services/vllm/scripts/health_check.sh",
+    "source_sha256": "498353c88e0e90a29843cf0ed46c9bdf5ea6836d8eef07682cba7bb513e19b95",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "scripts/start_qwen_vl.sh",
+    "destination": "services/vllm/scripts/start_qwen_vl.sh",
+    "source_sha256": "9125ce516806efd4748e1995d37fa47f67d82a1ac7cfdd4203d2ea7cdab09d0b",
+    "notebook_outputs_removed": false
+  },
+  {
+    "source_project": "pkl-vllm-service",
+    "source_path": "services/README.md",
+    "destination": "services/vllm/services/README.md",
+    "source_sha256": "0fa6df0831e50d2734c4bef4d9639f3498f23dabb334c2976933d9a2d6c7de29",
+    "notebook_outputs_removed": false
+  }
+]

@@ -1,0 +1,5 @@
+id = "0001-agentic-workspace"
+title = "Spec-driven integration of the local AI workspace"
+status = "implemented"
+components = ["backend", "frontend", "media-workflow", "multimodal-agent", "vllm", "gpu", "gpu-llm"]
+requirements = ["GOV-1", "IMPORT-1", "BOUNDARY-1", "PORTABLE-1", "VERIFY-1"]

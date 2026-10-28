@@ -1,0 +1,5 @@
+openai>=1.50,<3
+python-dotenv>=1,<2
+Pillow>=10.4,<13
+mss>=9,<11
+pyautogui>=0.9.54,<1

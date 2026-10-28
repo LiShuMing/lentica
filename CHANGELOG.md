@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add spec-first AGENTS rules, component ownership, workspace checks, and a
+  reusable spec/verification template.
+- Consolidate media workflow, multimodal GUI example, vLLM service, GPU labs,
+  and GPU-to-LLM learning source under explicit component boundaries.
+- Keep environments, weights, media, task histories, and notebook outputs private.
+- Make GUI/cloud activity explicit and vLLM startup driven by portable TOML config.
+
 ## 0.1.0 - 2026-10-28
 
 - Extract the current Personal Knowledge Lab implementation into Lentica.

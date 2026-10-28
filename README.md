@@ -7,6 +7,27 @@ and an observable background queue in a local-first workspace. The name combines
 *lens* and *semantic*. It grew out of Personal Knowledge Lab and currently ships
 as an experimental, single-user application.
 
+## Workspace
+
+Lentica also hosts the related tools and learning projects in one spec-driven
+repository. Runtime dependencies remain separate; installing the knowledge app
+does not install a cloud CLI, desktop controller, GPU lab, or vLLM environment.
+
+| Component | Path | Runtime |
+| --- | --- | --- |
+| Knowledge product | `backend/`, `frontend/` | Local FastAPI + React |
+| Media generation | [apps/media-workflow](apps/media-workflow) | Explicit cloud Token Plan CLI |
+| GUI agent example | [examples/multimodal-agent](examples/multimodal-agent) | Explicit image/screen API use and confirmed actions |
+| Model serving | [services/vllm](services/vllm) | Separately provisioned vLLM/CUDA |
+| GPU examples | [labs/gpu](labs/gpu) | Rust/wgpu, HIP, DirectML, CUDA |
+| GPU-to-LLM lessons | [learning/gpu-llm](learning/gpu-llm) | Optional learning environment |
+
+Start changes with [AGENTS.md](AGENTS.md), [workspace.toml](workspace.toml), and a
+numbered [spec](specs/README.md). Scope/requirements, compatibility, acceptance
+checks, and actual verification records travel with the implementation. The
+knowledge backend stays local-only; remote media and GUI examples are explicit
+opt-in components with independent configuration.
+
 ## What Works Today
 
 - Photo search with CLIP image vectors and BGE text/context vectors, combined by
@@ -107,14 +128,15 @@ RRF combines rankings without adding incompatible raw cosine scores.
 
 ```bash
 python -m pytest
-ruff check backend
+python scripts/check_workspace.py
+ruff check backend scripts tests apps examples services labs learning
 python -m build
 cd frontend && npm run build
 ```
 
-Tests use temporary databases and synthetic files; they require no GPU, model
+Tests use temporary databases, mocked transports, and synthetic files; they require no GPU, model
 downloads, or access to personal libraries. CI tests Python 3.11/3.12 and builds
-the frontend. GPU/model quality and retrieval benchmarks need separate local
+the frontend. Optional cloud/GUI/GPU work is not executed by CI. GPU/model quality and retrieval benchmarks need separate local
 evaluation; no accuracy or latency gains are claimed by these smoke tests.
 
 The existing `backend.app.*` module namespace and API routes are retained to keep

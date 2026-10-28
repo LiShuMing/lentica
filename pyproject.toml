@@ -40,8 +40,8 @@ include = ["backend*"]
 exclude = ["backend.tests*"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
-pythonpath = ["."]
+testpaths = ["backend/tests", "tests", "apps/media-workflow/tests", "examples/multimodal-agent/tests"]
+pythonpath = [".", "apps/media-workflow", "examples/multimodal-agent"]
 
 [tool.ruff]
 target-version = "py311"

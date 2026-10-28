@@ -1,0 +1,15 @@
+model_path = "models/qwen2.5-vl-3b-instruct"
+served_model_name = "qwen-vl-photo-context"
+host = "127.0.0.1"
+port = 8100
+max_model_len = 4096
+max_num_seqs = 8
+max_num_batched_tokens = 4096
+gpu_memory_utilization = 0.82
+dtype = "bfloat16"
+max_pixels = 2007040
+
+[environment]
+# Historical compatibility switches; validate for the selected vLLM/GPU version.
+VLLM_USE_V2_MODEL_RUNNER = "0"
+VLLM_USE_FLASHINFER_SAMPLER = "0"

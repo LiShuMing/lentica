@@ -19,3 +19,9 @@ Dependencies retain their own license terms. The following deserve explicit revi
   document retrieval and smoke tests.
 
 These notes are not a complete license inventory of transitive dependencies.
+
+The media workflow, GUI learning example, GPU labs, and learning notes were
+consolidated from the maintainer's local projects. Their source now follows this
+workspace's code license; optional tools and packages (including Bailian CLI,
+Qwen Code, OpenAI SDK, DirectML, wgpu, HIP/CUDA, and learning dependencies) retain
+their upstream terms. No generated media or third-party model weights are included.

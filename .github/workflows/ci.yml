@@ -20,7 +20,17 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e '.[dev]'
-      - run: ruff check backend
+      - run: python scripts/check_workspace.py
+      - name: Require a spec for behavior changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch --no-tags origin "$BASE_SHA"
+            python scripts/check_workspace.py --base "$BASE_SHA"
+          fi
+      - run: ruff check backend scripts tests apps examples services labs learning
+      - run: ruff format --check scripts tests apps examples services labs learning
       - run: python -m pytest
       - run: python -m build
   frontend:

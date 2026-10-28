@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PROJECT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec "${LENTICA_MEDIA_PYTHON:-python3}" "$PROJECT/media.py" "$@"
