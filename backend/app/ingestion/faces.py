@@ -89,23 +89,37 @@ class FaceIndexer:
 
 
 def people_for_file(db: Session, file_id: int) -> list[dict[str, object]]:
+    return people_for_files(db, [file_id]).get(file_id, [])
+
+
+def people_for_files(db: Session, file_ids: list[int]) -> dict[int, list[dict[str, object]]]:
+    if not file_ids:
+        return {}
+    result: dict[int, list[dict[str, object]]] = {}
+    # Bound SQLite bind parameters, including libraries with many candidates.
+    for start in range(0, len(file_ids), 500):
+        _people_batch(db, file_ids[start : start + 500], result)
+    return result
+
+
+def _people_batch(db, file_ids, result) -> None:
     rows = db.execute(
-        select(PersonCluster, func.count(FaceDetection.id))
+        select(FaceDetection.file_id, PersonCluster, func.count(FaceDetection.id))
         .join(FaceDetection, FaceDetection.cluster_id == PersonCluster.id)
-        .where(FaceDetection.file_id == file_id, PersonCluster.ignored.is_(False))
-        .group_by(PersonCluster.id)
+        .where(FaceDetection.file_id.in_(file_ids), PersonCluster.ignored.is_(False))
+        .group_by(FaceDetection.file_id, PersonCluster.id)
     ).all()
-    aliases_by_cluster = _aliases_by_cluster(db, [cluster.id for cluster, _count in rows])
-    return [
-        {
-            "cluster_id": cluster.id,
-            "label": cluster.label,
-            "name": cluster.display_name or cluster.label,
-            "aliases": aliases_by_cluster.get(cluster.id, []),
-            "face_count": int(count),
-        }
-        for cluster, count in rows
-    ]
+    aliases_by_cluster = _aliases_by_cluster(db, list({cluster.id for _file, cluster, _count in rows}))
+    for file_id, cluster, count in rows:
+        result.setdefault(file_id, []).append(
+            {
+                "cluster_id": cluster.id,
+                "label": cluster.label,
+                "name": cluster.display_name or cluster.label,
+                "aliases": aliases_by_cluster.get(cluster.id, []),
+                "face_count": int(count),
+            }
+        )
 
 
 def matching_person_file_ids(db: Session, query: str) -> tuple[set[int], list[str]]:
@@ -132,15 +146,16 @@ def matching_person_file_ids(db: Session, query: str) -> tuple[set[int], list[st
     files_by_identity = [
         {
             int(file_id)
-            for file_id in db.scalars(select(FaceDetection.file_id).where(FaceDetection.cluster_id.in_(cluster_ids))).all()
+            for file_id in db.scalars(
+                select(FaceDetection.file_id).where(FaceDetection.cluster_id.in_(cluster_ids))
+            ).all()
         }
         for cluster_ids in identity_clusters.values()
     ]
     if len(files_by_identity) == 1:
         return files_by_identity[0], sorted(matched_names)
     co_occurrence = set.intersection(*files_by_identity) if files_by_identity else set()
-    any_match = set.union(*files_by_identity) if files_by_identity else set()
-    return (co_occurrence or any_match), sorted(matched_names)
+    return co_occurrence, sorted(matched_names)
 
 
 def refresh_people_context_for_cluster(db: Session, cluster_id: int) -> int:
@@ -228,7 +243,9 @@ def _cosine(a: list[float], b: list[float]) -> float:
 def _aliases_by_cluster(db: Session, cluster_ids: list[int]) -> dict[int, list[str]]:
     if not cluster_ids:
         return {}
-    rows = db.execute(select(PersonAlias.cluster_id, PersonAlias.alias).where(PersonAlias.cluster_id.in_(cluster_ids))).all()
+    rows = db.execute(
+        select(PersonAlias.cluster_id, PersonAlias.alias).where(PersonAlias.cluster_id.in_(cluster_ids))
+    ).all()
     result: dict[int, list[str]] = {}
     for cluster_id, alias in rows:
         text = str(alias or "").strip()

@@ -1,0 +1,5 @@
+id = "0004-hybrid-search-optimization"
+title = "Leakage-aware CPU retrieval optimization and locked evaluation"
+status = "implemented"
+components = ["backend"]
+requirements = ["SPARSE-1", "SPLIT-1", "SELECT-1", "LOCK-1", "REPORT-1", "COMPAT-1"]

@@ -3,22 +3,41 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import hashlib
 import logging
 import socket
+import signal
+import threading
+import uuid
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import exists, select, update
+from sqlalchemy import delete, exists, select, update, or_
 
 from backend.app.core.config import (
-    CLIP_MODEL, DATA_DIR, PHOTOS_SOURCE, QWEN_MODEL, TEXT_MODEL,
-    VISION_ENDPOINT, VISION_MODEL, get_settings,
+    CLIP_MODEL,
+    DATA_DIR,
+    PHOTOS_SOURCE,
+    QWEN_MODEL,
+    TEXT_MODEL,
+    VISION_ENDPOINT,
+    VISION_MODEL,
+    get_settings,
 )
 from backend.app.core.paths import to_windows_path
-from backend.app.db.models import FaceDetection, File, Image, ProcessingRun, ProcessingTask, Source, TaskPayload
+from backend.app.db.models import (
+    FaceDetection,
+    File,
+    Image,
+    PhotoVector,
+    ProcessingRun,
+    ProcessingTask,
+    Source,
+    TaskPayload,
+)
 from backend.app.db.session import SessionLocal, init_db
 from backend.app.ingestion.faces import FaceIndexer, people_for_file, refresh_people_context_for_file
 from backend.app.ingestion.photo_metadata import (
@@ -26,7 +45,9 @@ from backend.app.ingestion.photo_metadata import (
     ensure_local_geocode_cache,
     upsert_photo_metadata_candidates,
 )
-from backend.app.ingestion.images import inspect_image, iter_image_files, make_thumbnail
+from backend.app.ingestion.images import inspect_image, iter_image_files, make_thumbnail, sha256_file, SUPPORTED_IMAGES
+from backend.app.ingestion.traversal import iter_source_files, scan_cursor
+from backend.app.workers.task_store import LEASE_SECONDS, LostLease, TaskLease, enqueue_task
 from backend.app.embedding.context_text_builder import build_context_vector_texts
 from backend.app.ingestion.scanner import scan_documents
 from backend.app.models.local_clip import Embedder, build_embedder
@@ -101,6 +122,8 @@ class ImageWorker:
     def __init__(self, worker_id: str | None = None) -> None:
         self.worker_id = worker_id or f"{socket.gethostname()}:{time.time_ns()}"
         self.models = ModelManager()
+        self.stop_requested = threading.Event()
+        self._lease: TaskLease | None = None
         self.logger = logging.getLogger("personal_knowledge_lab.image_worker")
 
     def run_forever(
@@ -110,12 +133,12 @@ class ImageWorker:
         auto_payload: dict[str, Any] | None = None,
     ) -> None:
         self.logger.info("worker_start worker_id=%s auto_enqueue=%s", self.worker_id, auto_enqueue)
-        while True:
+        while not self.stop_requested.is_set():
             handled = self.run_once()
             if not handled and auto_enqueue:
                 handled = self.enqueue_next_batch(auto_payload or {})
             if not handled:
-                time.sleep(poll_seconds)
+                self.stop_requested.wait(poll_seconds)
 
     def run_once(self) -> bool:
         db = SessionLocal()
@@ -148,6 +171,7 @@ class ImageWorker:
                     ["index_photos", "index_documents", "index_faces", "refresh_person_vectors"]
                 ),
                 ProcessingTask.state == "queued",
+                or_(ProcessingTask.next_attempt_at.is_(None), ProcessingTask.next_attempt_at <= datetime.utcnow()),
             )
             .order_by(ProcessingTask.priority.asc(), ProcessingTask.id.asc())
         )
@@ -156,7 +180,13 @@ class ImageWorker:
         result = db.execute(
             update(ProcessingTask)
             .where(ProcessingTask.id == task_id, ProcessingTask.state == "queued")
-            .values(state="running", worker_id=self.worker_id, attempt_count=ProcessingTask.attempt_count + 1)
+            .values(
+                state="running",
+                worker_id=self.worker_id,
+                attempt_count=ProcessingTask.attempt_count + 1,
+                claim_token=uuid.uuid4().hex,
+                lease_expires_at=datetime.utcnow() + timedelta(seconds=LEASE_SECONDS),
+            )
         )
         if result.rowcount != 1:
             db.rollback()
@@ -168,58 +198,76 @@ class ImageWorker:
         db.refresh(task)
         return task
 
-    def _run_task(self, db, task: ProcessingTask) -> None:
-        run = ProcessingRun(task_id=task.id, started_at=datetime.utcnow())
-        db.add(run)
-        db.commit()
-        payload = _task_payload(db, task.id)
-        self.logger.info("task_start task_id=%s payload=%s", task.id, json.dumps(payload, ensure_ascii=False))
-        try:
-            if task.pipeline_stage == "index_photos":
-                stats = self._index_photos(db, payload).__dict__
-                model_profile = _photo_model_profile(payload)
-            elif task.pipeline_stage == "index_faces":
-                stats = self._index_faces(db, payload).__dict__
-                model_profile = "insightface+incremental_centroid"
-            elif task.pipeline_stage == "refresh_person_vectors":
-                stats = self._refresh_person_vectors(db, payload).__dict__
-                model_profile = _person_refresh_model_profile(payload)
-            elif task.pipeline_stage == "index_documents":
-                job = scan_documents(
-                    db,
-                    source_id=payload.get("source_id"),
-                    max_files=None if int(payload.get("max_files", 100)) == 0 else int(payload.get("max_files", 100)),
-                    max_bytes=int(payload.get("max_mb", 20)) * 1024 * 1024,
-                )
-                stats = {
-                    "job_id": job.id,
-                    "status": job.status,
-                    "total_files": job.total_files,
-                    "indexed_files": job.indexed_files,
-                    "skipped_files": job.skipped_files,
-                    "failed_files": job.failed_files,
-                    "error": job.error,
-                }
-                model_profile = "document_parser+local_tfidf"
-            else:
-                raise ValueError(f"Unsupported task stage: {task.pipeline_stage}")
-            task.state = "succeeded"
-            task.error = None
-            run.finished_at = datetime.utcnow()
-            run.model_profile = model_profile
-            run.output_artifact_ids = json.dumps(stats, ensure_ascii=False)
-            self.logger.info("task_done task_id=%s stats=%s", task.id, stats)
-        except Exception as exc:  # noqa: BLE001
-            task.state = "failed"
-            task.error = repr(exc)
-            run.finished_at = datetime.utcnow()
-            run.error = repr(exc)
-            self.logger.exception("task_failed task_id=%s error=%r", task.id, exc)
-        finally:
+    def _commit(self, db) -> None:
+        if self._lease:
+            self._lease.commit(db)
+        else:
             db.commit()
+
+    def _document_task(self, db, payload):
+        job = scan_documents(
+            db,
+            source_id=payload.get("source_id"),
+            max_files=None if int(payload.get("max_files", 100)) == 0 else int(payload.get("max_files", 100)),
+            max_bytes=int(payload.get("max_mb", 20)) * 1024 * 1024,
+            commit=lambda: self._commit(db),
+        )
+        return {
+            key: getattr(job, key)
+            for key in ("status", "total_files", "indexed_files", "skipped_files", "failed_files", "error")
+        }
+
+    def _run_task(self, db, task: ProcessingTask) -> None:
+        self._lease = TaskLease(task.id, task.claim_token, SessionLocal)
+        run = ProcessingRun(task_id=task.id, started_at=datetime.utcnow())
+        payload = _task_payload(db, task.id)
+        handlers = {
+            "index_photos": (self._index_photos, lambda: _photo_model_profile(payload)),
+            "index_faces": (self._index_faces, lambda: "insightface+incremental_centroid"),
+            "refresh_person_vectors": (self._refresh_person_vectors, lambda: _person_refresh_model_profile(payload)),
+            "index_documents": (self._document_task, lambda: "document_parser+local_tfidf"),
+        }
+        try:
+            db.add(run)
+            self._commit(db)
+            with self._lease.heartbeat():
+                handler, profile = handlers[task.pipeline_stage]
+                output = handler(db, payload)
+                stats = output if isinstance(output, dict) else output.__dict__
+                failed = int(stats.get("failed", stats.get("failed_files", 0)))
+                error = stats.get("error")
+                if failed or stats.get("status") == "failed":
+                    error = error or f"{failed} item(s) failed; see run statistics"
+                task.state = "failed" if error else "succeeded"
+                task.error = str(error) if error else None
+                run.error = task.error
+                run.finished_at = datetime.utcnow()
+                run.model_profile = profile()
+                run.output_artifact_ids = json.dumps(stats, ensure_ascii=False)
+                self._commit(db)
+        except LostLease:
+            db.rollback()
+            self.logger.warning("task_ownership_lost task_id=%s", task.id)
+        except Exception as exc:
+            db.rollback()
+            try:
+                # Verify before recording failure; a stale owner must not overwrite recovery.
+                self._lease.renew(db)
+                task.state = "failed"
+                task.error = repr(exc)
+                run.finished_at = datetime.utcnow()
+                run.error = repr(exc)
+                self._commit(db)
+            except LostLease:
+                db.rollback()
+            self.logger.exception("task_failed task_id=%s", task.id)
+        finally:
+            self._lease = None
 
     def _index_photos(self, db, payload: dict[str, Any]) -> IndexStats:
         root = Path(payload.get("root") or get_settings().photos_source)
+        if not root.is_dir():
+            raise FileNotFoundError(f"Source directory unavailable: {root}")
         limit = payload.get("limit")
         max_indexed = payload.get("max_indexed")
         force = bool(payload.get("force", False))
@@ -240,6 +288,7 @@ class ImageWorker:
         unindexed_only = bool(payload.get("unindexed_only", True))
         target_path = str(payload.get("target_path") or "")
 
+        self._commit(db)  # Release the payload read snapshot before loading models.
         vision_client = self.models.vision_client(
             VisionClientConfig(
                 backend=vision_backend,
@@ -282,27 +331,6 @@ class ImageWorker:
             stats.scanned += 1
             try:
                 existing = db.scalar(select(File).where(File.canonical_path == str(image_path)))
-                if (
-                    existing
-                    and existing.ingestion_status == "indexed"
-                    and not force
-                    and unindexed_only
-                    and _image_context_current(db, existing)
-                ):
-                    if _backfill_metadata_context(db, existing, image_path):
-                        stats.metadata_backfilled += 1
-                        db.commit()
-                    stats.skipped += 1
-                    self.logger.info(
-                        "image_skipped_fast scanned=%d indexed=%d skipped=%d failed=%d elapsed=%.2fs path=%s",
-                        stats.scanned,
-                        stats.indexed,
-                        stats.skipped,
-                        stats.failed,
-                        time.monotonic() - item_started,
-                        image_path,
-                    )
-                    continue
                 meta = inspect_image(image_path)
                 file = existing
                 if (
@@ -311,10 +339,12 @@ class ImageWorker:
                     and file.ingestion_status == "indexed"
                     and not force
                     and _image_context_current(db, file)
+                    and db.scalar(select(Image.index_profile).where(Image.file_id == file.id))
+                    in (None, _index_profile(payload))
                 ):
                     if _backfill_metadata_context(db, file, image_path, meta):
                         stats.metadata_backfilled += 1
-                        db.commit()
+                        self._commit(db)
                     stats.skipped += 1
                     self.logger.info(
                         "image_skipped scanned=%d indexed=%d skipped=%d failed=%d elapsed=%.2fs path=%s",
@@ -327,6 +357,7 @@ class ImageWorker:
                     )
                     continue
 
+                self._commit(db)  # Keep slow vision requests outside a read transaction.
                 thumb = make_thumbnail(image_path, thumb_dir)
                 analysis = vision_client.analyze_photo(image_path)
                 context = _normalize_context(analysis)
@@ -342,17 +373,33 @@ class ImageWorker:
                 if face_stats.faces:
                     _attach_people_context(db, file, context)
                 _attach_metadata_context(db, file, meta, context)
+                image = db.scalar(select(Image).where(Image.file_id == file.id))
+                image.index_profile = _index_profile(payload)
+                # Replace the complete vector set in the same transaction as the context.
+                db.execute(delete(PhotoVector).where(PhotoVector.file_id == file.id))
                 image_vector = image_embedder.embed_image(image_path, caption=caption)
-                upsert_photo_vector(db, file.id, _vector_namespace(embedder_kind, "image"), image_vector)
-                for namespace, text in _context_vector_texts(context, image_path, meta).items():
-                    if text.strip():
-                        upsert_photo_vector(
-                            db,
-                            file.id,
-                            _vector_namespace(actual_text_embedder_kind, namespace),
-                            text_embedder.embed_text(text),
-                        )
-                db.commit()
+                upsert_photo_vector(
+                    db,
+                    file.id,
+                    _vector_namespace(embedder_kind, "image"),
+                    image_vector,
+                    encoder_id=image_embedder.encoder_id,
+                )
+                texts = {
+                    name: value
+                    for name, value in _context_vector_texts(context, image_path, meta).items()
+                    if value.strip()
+                }
+                vectors = text_embedder.embed_texts(list(texts.values()))
+                for namespace, vector in zip(texts, vectors):
+                    upsert_photo_vector(
+                        db,
+                        file.id,
+                        _vector_namespace(actual_text_embedder_kind, namespace),
+                        vector,
+                        encoder_id=text_embedder.encoder_id,
+                    )
+                self._commit(db)
                 stats.indexed += 1
                 self.logger.info(
                     "image_indexed scanned=%d indexed=%d skipped=%d failed=%d elapsed=%.2fs file_id=%d path=%s",
@@ -364,6 +411,8 @@ class ImageWorker:
                     file.id,
                     image_path,
                 )
+            except LostLease:
+                raise
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
                 stats.failed += 1
@@ -395,8 +444,7 @@ class ImageWorker:
         if not force:
             query = query.where(
                 ~exists(select(FaceDetection.id).where(FaceDetection.file_id == File.id)),
-                (Image.face_analysis_status.is_(None))
-                | (Image.face_analysis_status.in_(["pending", "failed"])),
+                (Image.face_analysis_status.is_(None)) | (Image.face_analysis_status.in_(["pending", "failed"])),
             )
         rows = db.execute(query.order_by(File.id.asc()).limit(limit)).scalars()
         for file in rows:
@@ -409,12 +457,16 @@ class ImageWorker:
                 stats.face_unavailable += 1 if face_stats.unavailable else 0
                 if face_stats.unavailable:
                     stats.skipped += 1
+                elif face_stats.error:
+                    stats.failed += 1
                 else:
                     stats.indexed += 1
                     image = db.scalar(select(Image).where(Image.file_id == file.id))
                     context = _parse_context_json(image.context_json if image else None)
                     refresh_people_context_for_file(db, file.id)
-                db.commit()
+                self._commit(db)
+            except LostLease:
+                raise
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
                 stats.failed += 1
@@ -458,6 +510,12 @@ class ImageWorker:
                 meta = _stored_meta_from_image(image)
                 texts = _context_vector_texts(context, Path(file.canonical_path), meta)
                 for namespace in ["text", "people", "metadata"]:
+                    db.execute(
+                        delete(PhotoVector).where(
+                            PhotoVector.file_id == file.id,
+                            (PhotoVector.namespace == namespace) | PhotoVector.namespace.like(f"%:{namespace}"),
+                        )
+                    )
                     text = texts.get(namespace, "")
                     if not text.strip():
                         continue
@@ -466,13 +524,18 @@ class ImageWorker:
                         file.id,
                         _vector_namespace(actual_text_embedder_kind, namespace),
                         text_embedder.embed_text(text),
+                        encoder_id=text_embedder.encoder_id,
                     )
                     stats.vectors_written += 1
+                self._commit(db)
                 stats.indexed += 1
+            except LostLease:
+                raise
             except Exception as exc:  # noqa: BLE001
+                db.rollback()
                 stats.failed += 1
                 self.logger.exception("refresh_person_vectors_failed file_id=%s error=%r", file.id, exc)
-        db.commit()
+        self._commit(db)
         return stats
 
     def _text_embedder(
@@ -492,68 +555,39 @@ class ImageWorker:
 
 
 def enqueue_photo_index(db, payload: dict[str, Any]) -> ProcessingTask:
-    key = f"index_photos:{time.time_ns()}"
-    task = ProcessingTask(
-        idempotency_key=key,
-        pipeline_stage="index_photos",
-        priority=int(payload.get("priority", 100)),
-        state="queued",
-    )
-    db.add(task)
-    db.flush()
-    db.add(TaskPayload(task_id=task.id, payload_json=json.dumps(payload, ensure_ascii=False)))
-    db.commit()
-    db.refresh(task)
-    return task
+    return enqueue_task(db, "index_photos", payload, priority=int(payload.get("priority", 100)))
 
 
 def enqueue_document_index(db, payload: dict[str, Any]) -> ProcessingTask:
-    key = f"index_documents:{time.time_ns()}"
-    task = ProcessingTask(
-        idempotency_key=key,
-        pipeline_stage="index_documents",
-        priority=int(payload.get("priority", 100)),
-        state="queued",
-    )
-    db.add(task)
-    db.flush()
-    db.add(TaskPayload(task_id=task.id, payload_json=json.dumps(payload, ensure_ascii=False)))
-    db.commit()
-    db.refresh(task)
-    return task
+    return enqueue_task(db, "index_documents", payload, priority=int(payload.get("priority", 100)))
 
 
 def enqueue_face_index(db, payload: dict[str, Any]) -> ProcessingTask:
-    key = f"index_faces:{time.time_ns()}"
-    task = ProcessingTask(
-        idempotency_key=key,
-        pipeline_stage="index_faces",
-        priority=int(payload.get("priority", 90)),
-        state="queued",
-    )
-    db.add(task)
-    db.flush()
-    db.add(TaskPayload(task_id=task.id, payload_json=json.dumps(payload, ensure_ascii=False)))
-    db.commit()
-    db.refresh(task)
-    return task
+    return enqueue_task(db, "index_faces", payload, priority=int(payload.get("priority", 90)))
 
 
 def enqueue_person_vector_refresh(db, payload: dict[str, Any]) -> ProcessingTask:
-    cluster_id = payload.get("cluster_id", "all")
-    key = f"refresh_person_vectors:{cluster_id}:{time.time_ns()}"
-    task = ProcessingTask(
-        idempotency_key=key,
-        pipeline_stage="refresh_person_vectors",
-        priority=int(payload.get("priority", 120)),
-        state="queued",
-    )
-    db.add(task)
-    db.flush()
-    db.add(TaskPayload(task_id=task.id, payload_json=json.dumps(payload, ensure_ascii=False)))
-    db.commit()
-    db.refresh(task)
-    return task
+    return enqueue_task(db, "refresh_person_vectors", payload, priority=int(payload.get("priority", 120)))
+
+
+def _index_profile(payload: dict) -> str:
+    embedder = payload.get("embedder_kind", "hash")
+    captioner = payload.get("captioner_kind", "basic")
+    profile = {
+        "pipeline": "photo-context-v2-encoder-spaces-v1",
+        "captioner": captioner,
+        "caption_model": payload.get("caption_model") or DEFAULT_QWEN_VL_PATH,
+        "vision_backend": payload.get("vision_backend") or ("vllm" if captioner == "qwen-vl" else "basic"),
+        "vision_endpoint": payload.get("vision_endpoint") or VISION_ENDPOINT,
+        "vision_model": payload.get("vision_model") or VISION_MODEL,
+        "vision_fallback": payload.get("vision_fallback") or "transformers",
+        "max_pixels": int(payload.get("max_pixels", 768 * 768)),
+        "embedder": embedder,
+        "embed_model": payload.get("embed_model") or DEFAULT_CLIP_MODEL,
+        "text_embedder": payload.get("text_embedder_kind") or ("bge" if embedder == "clip" else embedder),
+        "text_model": payload.get("text_embed_model") or DEFAULT_BGE_MODEL,
+    }
+    return hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
 
 
 def _photo_model_profile(payload: dict[str, Any]) -> str:
@@ -562,7 +596,9 @@ def _photo_model_profile(payload: dict[str, Any]) -> str:
     vision_model = payload.get("vision_model") or payload.get("caption_model") or "local"
     image_embedder = payload.get("embedder_kind") or "hash"
     text_embedder = payload.get("text_embedder_kind") or image_embedder
-    embedding_device = payload.get("embedding_device") or ("cpu" if vision_backend == "vllm" else payload.get("device")) or "cpu"
+    embedding_device = (
+        payload.get("embedding_device") or ("cpu" if vision_backend == "vllm" else payload.get("device")) or "cpu"
+    )
     return f"vision:{vision_backend}:{vision_model}+image:{image_embedder}@{embedding_device}+text:{text_embedder}@{embedding_device}"
 
 
@@ -578,7 +614,7 @@ def enqueue_next_photo_batch(db, payload: dict[str, Any]) -> ProcessingTask | No
         return None
     root = Path(payload.get("root") or get_settings().photos_source)
     probe_limit = int(payload.get("probe_limit", 1000))
-    candidate = _first_unindexed_image(db, root, probe_limit=probe_limit)
+    candidate = _first_unindexed_image(db, root, probe_limit=probe_limit, payload=payload)
     if not candidate:
         return None
     task_payload = {
@@ -653,20 +689,34 @@ def _first_unindexed_face(db) -> int | None:
     )
 
 
-def _first_unindexed_image(db, root: Path, probe_limit: int = 1000) -> Path | None:
+def _first_unindexed_image(db, root: Path, probe_limit: int = 1000, payload: dict | None = None) -> Path | None:
+    source = _ensure_photo_source(db, root)
+    cursor = scan_cursor(db, source.id, "photos")
     scanned = 0
-    for image_path in iter_image_files(root):
+    for image_path in iter_source_files(root, SUPPORTED_IMAGES, after=cursor.path):
+        if scanned >= max(1, probe_limit):
+            db.commit()
+            return None
         scanned += 1
+        cursor.path = str(image_path)
         file = db.scalar(select(File).where(File.canonical_path == str(image_path)))
         if (
             not file
             or file.ingestion_status != "indexed"
+            or file.sha256 != sha256_file(image_path)
             or not _image_context_current(db, file)
             or not _image_metadata_context_current(db, file)
+            or (
+                payload is not None
+                and (stored_profile := db.scalar(select(Image.index_profile).where(Image.file_id == file.id)))
+                is not None
+                and stored_profile != _index_profile(payload)
+            )
         ):
+            db.commit()
             return image_path
-        if scanned >= probe_limit:
-            return None
+    cursor.path = ""
+    db.commit()
     return None
 
 
@@ -913,7 +963,9 @@ def _context_vector_texts(context: dict[str, object], image_path: Path, meta) ->
             event,
             metadata_candidates,
             f"{meta.exif_taken_at:%Y-%m-%d}" if meta.exif_taken_at else "",
-            f"gps {meta.gps_lat:.6f} {meta.gps_lon:.6f}" if meta.gps_lat is not None and meta.gps_lon is not None else "",
+            f"gps {meta.gps_lat:.6f} {meta.gps_lon:.6f}"
+            if meta.gps_lat is not None and meta.gps_lon is not None
+            else "",
         ]
         if part
     )
@@ -970,11 +1022,17 @@ def _v2_context_vector_texts(context: dict[str, object], image_path: Path, meta)
             str(metadata.get("location_name") or ""),
             str(metadata.get("captured_at") or ""),
             f"{meta.exif_taken_at:%Y-%m-%d}" if meta.exif_taken_at else "",
-            f"gps {meta.gps_lat:.6f} {meta.gps_lon:.6f}" if meta.gps_lat is not None and meta.gps_lon is not None else "",
+            f"gps {meta.gps_lat:.6f} {meta.gps_lon:.6f}"
+            if meta.gps_lat is not None and meta.gps_lon is not None
+            else "",
         ]
         if part
     )
-    aggregate = " ".join(part for part in [vector_texts.caption_text, vector_texts.context_text, vector_texts.ocr_text, people, deterministic] if part)
+    aggregate = " ".join(
+        part
+        for part in [vector_texts.caption_text, vector_texts.context_text, vector_texts.ocr_text, people, deterministic]
+        if part
+    )
     return {
         "text": aggregate,
         "caption": vector_texts.caption_text,
@@ -1089,10 +1147,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Process at most one queued task and exit.")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
-    parser.add_argument("--auto-enqueue", action="store_true", help="Continuously enqueue the next photo batch when idle.")
+    parser.add_argument(
+        "--auto-enqueue", action="store_true", help="Continuously enqueue the next photo batch when idle."
+    )
     parser.add_argument("--limit", type=int, default=100, help="Max files scanned per auto-enqueued task.")
     parser.add_argument("--max-indexed", type=int, default=10, help="Max newly indexed photos per auto-enqueued task.")
-    parser.add_argument("--probe-limit", type=int, default=1000, help="Max source paths probed while looking for new photos.")
+    parser.add_argument(
+        "--probe-limit", type=int, default=1000, help="Max source paths probed while looking for new photos."
+    )
     parser.add_argument("--captioner-kind", default="basic", choices=["basic", "qwen-vl"])
     parser.add_argument("--embedder-kind", default="hash", choices=["hash", "clip"])
     parser.add_argument("--text-embedder-kind", default=None, choices=["hash", "clip", "bge"])
@@ -1103,6 +1165,7 @@ def main() -> None:
     configure_logging()
     init_db()
     worker = ImageWorker()
+    signal.signal(signal.SIGUSR1, lambda *_: worker.stop_requested.set())
     if args.once:
         worker.run_once()
     else:

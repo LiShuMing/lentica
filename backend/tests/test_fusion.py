@@ -39,3 +39,16 @@ class FusionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_fusion_deduplicates_each_source_and_breaks_ties_by_id():
+    results = {
+        "visual": [
+            RetrievalHit(asset_id=2, rank=1, score=1.0, source="visual"),
+            RetrievalHit(asset_id=2, rank=2, score=0.9, source="visual"),
+        ],
+        "text": [RetrievalHit(asset_id=1, rank=1, score=0.01, source="text")],
+    }
+    fused = weighted_rrf(results)
+    assert [hit.asset_id for hit in fused] == [1, 2]
+    assert fused[0].score == fused[1].score

@@ -15,7 +15,7 @@ export function SettingsPage() {
       </header>
       {data ? (
         <div className="settings-list">
-          <Setting label="~/.env present" value={data.env_file_present ? "yes" : "no"} />
+          <Setting label="Project .env present" value={data.env_file_present ? "yes" : "no"} />
           <Setting label="Runtime mode" value={data.runtime_mode} />
           <Setting label="External API enabled" value={data.external_api_enabled ? "yes" : "no"} />
           <Setting label="Legacy LLM env detected" value={data.legacy_llm_env_present ? "yes, ignored" : "no"} />

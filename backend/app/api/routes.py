@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
+from datetime import datetime
 from functools import lru_cache
 from io import BytesIO
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,24 +44,22 @@ from backend.app.db.models import (
     Chunk,
     FaceDetection,
     File,
-    Image,
     ModelProfile,
-    PersonCluster,
     PersonAlias,
+    PersonCluster,
     ProcessingRun,
     ProcessingTask,
     Source,
     TaskPayload,
 )
 from backend.app.db.session import get_db
-from backend.app.ingestion.scanner import ensure_default_sources, scan_documents
 from backend.app.ingestion.faces import refresh_people_context_for_cluster
+from backend.app.ingestion.scanner import ensure_default_sources, scan_documents
 from backend.app.llm.client import LocalAnswerer
-from backend.app.models.local_registry import list_local_models
 from backend.app.models.local_clip import Embedder, build_embedder
+from backend.app.models.local_registry import list_local_models
 from backend.app.models.vision_service import vision_status as get_vision_service_status
-from backend.app.retrieval.photo_search import PhotoSearch
-from backend.app.retrieval.service import search_knowledge
+from backend.app.retrieval import asset_search, service
 from backend.app.workers.image_worker import (
     enqueue_document_index,
     enqueue_face_index,
@@ -232,23 +231,57 @@ def search_photos(request: PhotoSearchRequest, db: Session = Depends(get_db)) ->
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
-    visual_embedder, text_embedder = _photo_search_embedders(request)
-    answer, hits = PhotoSearch(db, visual_embedder, text_embedder).search(query, limit=request.limit)
-    return PhotoSearchResponse(answer=answer, hits=[hit.__dict__ for hit in hits])
+    result = _product_search(db, request, ["photo", "screenshot"])
+    return PhotoSearchResponse(answer=result.answer, hits=[asdict(hit) for hit in result.photos])
 
 
 @router.post("/api/v2/search", response_model=PhotoSearchV2Response)
 def search_assets_v2(request: PhotoSearchV2Request, db: Session = Depends(get_db)) -> PhotoSearchV2Response:
-    query = request.query.strip()
-    if not query:
+    if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query is required")
-    visual_embedder, text_embedder = _photo_search_embedders(request)
-    answer, hits, debug = PhotoSearch(db, visual_embedder, text_embedder).search_with_debug(query, limit=request.limit)
+    result = _product_search(db, request, request.asset_types)
     return PhotoSearchV2Response(
-        answer=answer,
-        hits=[hit.__dict__ for hit in hits],
-        plan=debug.pop("plan"),
-        debug=debug if request.debug else None,
+        answer=result.answer,
+        hits=[asdict(hit) for hit in result.photos],
+        document_hits=[_document_payload(row) for row in result.documents],
+        results=[
+            dict(
+                file_id=hit.file_id,
+                asset_type=hit.asset_type,
+                rank=hit.rank,
+                score=hit.score,
+                unit_ids=list(hit.unit_ids),
+                photo=asdict(hit.photo) if hit.photo is not None else None,
+                documents=[_document_payload(row) for row in hit.documents],
+            )
+            for hit in result.results
+        ],
+        plan=result.plan.debug_payload(),
+        debug=result.debug if request.debug else None,
+    )
+
+
+def _product_search(db: Session, request: PhotoSearchRequest, asset_types: list[str]) -> asset_search.AssetSearchResult:
+    """Defer image model selection until the shared service chooses an image plan."""
+    return asset_search.search_assets(
+        db,
+        request.query.strip(),
+        limit=request.limit,
+        asset_types=asset_types,
+        embedders=lambda: _photo_search_embedders(request),
+    )
+
+
+def _document_payload(row: service.RetrievedSource) -> dict[str, object]:
+    """Project final selected chunk records into the existing citation contract."""
+    return dict(
+        file_id=row.file_id,
+        chunk_id=row.chunk_id,
+        path=row.path,
+        windows_path=row.windows_path,
+        page_or_segment=row.page_or_segment,
+        score=row.score,
+        excerpt=row.text[:360],
     )
 
 
@@ -264,9 +297,7 @@ def photo_thumbnail(name: str) -> FileResponse:
 
 @router.get("/api/tasks", response_model=list[TaskInfo])
 def list_tasks(limit: int = 50, db: Session = Depends(get_db)) -> list[TaskInfo]:
-    tasks = db.scalars(
-        select(ProcessingTask).order_by(ProcessingTask.id.desc()).limit(min(limit, 200))
-    ).all()
+    tasks = db.scalars(select(ProcessingTask).order_by(ProcessingTask.id.desc()).limit(min(limit, 200))).all()
     return [_task_info(db, task) for task in tasks]
 
 
@@ -305,16 +336,22 @@ def vision_status() -> VisionStatusResponse:
 
 @router.get("/api/people", response_model=list[PersonClusterInfo])
 def list_people(db: Session = Depends(get_db)) -> list[PersonClusterInfo]:
-    clusters = db.scalars(select(PersonCluster).order_by(PersonCluster.ignored.asc(), PersonCluster.face_count.desc())).all()
+    clusters = db.scalars(
+        select(PersonCluster).order_by(PersonCluster.ignored.asc(), PersonCluster.face_count.desc())
+    ).all()
     aliases_by_cluster = _aliases_by_cluster(db, [cluster.id for cluster in clusters])
     result: list[PersonClusterInfo] = []
     for cluster in clusters:
-        face_rows = db.execute(
-            select(FaceDetection)
-            .where(FaceDetection.cluster_id == cluster.id)
-            .order_by(FaceDetection.detection_score.desc())
-            .limit(8)
-        ).scalars().all()
+        face_rows = (
+            db.execute(
+                select(FaceDetection)
+                .where(FaceDetection.cluster_id == cluster.id)
+                .order_by(FaceDetection.detection_score.desc())
+                .limit(8)
+            )
+            .scalars()
+            .all()
+        )
         photo_count = db.scalar(
             select(func.count(func.distinct(FaceDetection.file_id))).where(FaceDetection.cluster_id == cluster.id)
         )
@@ -426,7 +463,9 @@ def cancel_task(task_id: int, db: Session = Depends(get_db)) -> TaskInfo:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.state != "queued":
-        raise HTTPException(status_code=409, detail=f"Only queued tasks can be cancelled; current state is {task.state}")
+        raise HTTPException(
+            status_code=409, detail=f"Only queued tasks can be cancelled; current state is {task.state}"
+        )
     task.state = "cancelled"
     task.error = "Cancelled by user"
     db.commit()
@@ -440,7 +479,9 @@ def retry_task(task_id: int, db: Session = Depends(get_db)) -> TaskInfo:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.state not in {"failed", "cancelled"}:
-        raise HTTPException(status_code=409, detail=f"Only failed or cancelled tasks can be retried; current state is {task.state}")
+        raise HTTPException(
+            status_code=409, detail=f"Only failed or cancelled tasks can be retried; current state is {task.state}"
+        )
     payload_row = db.scalar(select(TaskPayload).where(TaskPayload.task_id == task.id))
     payload = json.loads(payload_row.payload_json) if payload_row else {}
     if task.pipeline_stage == "index_photos":
@@ -462,7 +503,7 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatRespo
     if not question:
         raise HTTPException(status_code=400, detail="Question is required")
 
-    retrieved = search_knowledge(db, question, limit=request.limit)
+    retrieved = asset_search.search_assets(db, question, limit=request.limit, asset_types=["document"]).documents
     evidence = [
         {
             "file_id": item.file_id,
@@ -497,7 +538,7 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatRespo
         trace=[
             "classify: document_search",
             "rewrite: deterministic",
-            "retrieve: local_tfidf",
+            "retrieve: staged_hybrid_document_tfidf",
             "answer: extractive_local",
         ],
     )
@@ -599,7 +640,9 @@ def _parse_float_list(value: str | None) -> list[float]:
 def _aliases_by_cluster(db: Session, cluster_ids: list[int]) -> dict[int, list[str]]:
     if not cluster_ids:
         return {}
-    rows = db.execute(select(PersonAlias.cluster_id, PersonAlias.alias).where(PersonAlias.cluster_id.in_(cluster_ids))).all()
+    rows = db.execute(
+        select(PersonAlias.cluster_id, PersonAlias.alias).where(PersonAlias.cluster_id.in_(cluster_ids))
+    ).all()
     result: dict[int, list[str]] = {}
     for cluster_id, alias in rows:
         text = str(alias or "").strip()
@@ -658,5 +701,3 @@ def _computational_load(stage: str, stats: dict[str, object]) -> dict[str, objec
             "failed": int(stats.get("failed", 0) or 0),
         }
     return {}
-    PersonClusterInfo,
-    PersonUpdateRequest,

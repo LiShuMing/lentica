@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ class RetrievalPlan:
         return result
 
 
-def build_retrieval_plan(db: Session, query: str, *, expand) -> RetrievalPlan:
+def build_retrieval_plan(db: Session, query: str, *, expand, asset_types: list[str] | None = None) -> RetrievalPlan:
     normalized = query.strip()
     expanded = expand(normalized)
     person_file_ids, person_names = matching_person_file_ids(db, expanded)
@@ -53,7 +53,7 @@ def build_retrieval_plan(db: Session, query: str, *, expand) -> RetrievalPlan:
         years.add(str(date.today().year - 1))
     if "今年" in normalized:
         years.add(str(date.today().year))
-    return RetrievalPlan(
+    plan = RetrievalPlan(
         original_query=normalized,
         semantic_query=expanded,
         visual_query=expanded,
@@ -70,3 +70,14 @@ def build_retrieval_plan(db: Session, query: str, *, expand) -> RetrievalPlan:
         use_ocr_lexical=ocr_intent,
         use_document_retrieval=document_intent,
     )
+    if asset_types:
+        photos = bool(set(asset_types) & {"photo", "screenshot"})
+        plan = replace(
+            plan,
+            asset_types=asset_types,
+            use_visual=photos,
+            use_caption_dense=photos,
+            use_context_dense=photos,
+            use_document_retrieval="document" in asset_types,
+        )
+    return plan

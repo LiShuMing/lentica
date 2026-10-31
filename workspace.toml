@@ -7,7 +7,7 @@ id = "backend"
 path = "backend"
 kind = "product"
 access = "local"
-spec = "specs/0001-agentic-workspace"
+spec = "specs/0009-product-hybrid-integration"
 check = "python -m pytest backend/tests"
 
 [[components]]
@@ -15,7 +15,7 @@ id = "frontend"
 path = "frontend"
 kind = "product"
 access = "local"
-spec = "specs/0001-agentic-workspace"
+spec = "specs/0009-product-hybrid-integration"
 check = "npm --prefix frontend run build"
 
 [[components]]

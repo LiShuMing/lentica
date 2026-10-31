@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.app.core.config import get_settings
@@ -14,8 +14,16 @@ class Base(DeclarativeBase):
 
 engine = create_engine(
     get_settings().database_url,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30},
 )
+
+
+@event.listens_for(engine, "connect")
+def _sqlite_options(connection, _record):
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=30000")
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -35,6 +43,8 @@ def init_db() -> None:
 
 
 def _ensure_lightweight_migrations() -> None:
+    from backend.app.db.migrations import migrate_consistency
+
     image_columns = {
         "width": "INTEGER",
         "height": "INTEGER",
@@ -48,6 +58,7 @@ def _ensure_lightweight_migrations() -> None:
         "indexed_at": "DATETIME",
     }
     with engine.begin() as conn:
+        migrate_consistency(conn)
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
         for name, ddl_type in image_columns.items():
             if name not in existing:
@@ -138,4 +149,6 @@ def _ensure_lightweight_migrations() -> None:
             )
             """
         )
-        conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_geocode_cache_lat_lon ON geocode_cache(lat_key, lon_key)")
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_geocode_cache_lat_lon ON geocode_cache(lat_key, lon_key)"
+        )

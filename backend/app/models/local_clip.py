@@ -4,13 +4,21 @@ import hashlib
 from pathlib import Path
 
 from backend.app.models.local_vision import ModelUnavailable
+from backend.app.models.encoder_space import space_id
 
 
 class Embedder:
     dims: int
 
+    @property
+    def encoder_id(self) -> str:
+        return getattr(self, "_encoder_id", f"{type(self).__module__}.{type(self).__qualname__}:{self.dims}")
+
     def embed_text(self, text: str) -> list[float]:
         raise NotImplementedError
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_text(text) for text in texts]
 
     def embed_image(self, image_path: Path, caption: str | None = None) -> list[float]:
         raise NotImplementedError
@@ -18,6 +26,7 @@ class Embedder:
 
 class HashEmbedder(Embedder):
     dims = 384
+    _encoder_id = "hash:sha256-expand-v1:384"
 
     def _embed(self, payload: bytes) -> list[float]:
         values: list[float] = []
@@ -54,6 +63,13 @@ class ClipEmbedder(Embedder):
         self.model.to(self.device)
         self.model.eval()
         self.dims = int(self.model.config.projection_dim)
+        self._encoder_id = space_id(
+            "clip",
+            model_name,
+            getattr(self.model.config, "_commit_hash", None),
+            dimensions=self.dims,
+            encoding="clip-processor-text77-image-v1",
+        )
 
     def embed_text(self, text: str) -> list[float]:
         inputs = self.processor(text=[text], return_tensors="pt", padding=True, truncation=True, max_length=77).to(
@@ -90,10 +106,20 @@ class BgeTextEmbedder(Embedder):
         self.model.to(self.device)
         self.model.eval()
         self.dims = int(getattr(self.model.config, "hidden_size", 0) or 0)
+        self._encoder_id = space_id(
+            "bge",
+            model_name,
+            getattr(self.model.config, "_commit_hash", None),
+            dimensions=self.dims,
+            encoding="mean-pool-mask-l2-text512-v1",
+        )
 
     def embed_text(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         inputs = self.tokenizer(
-            [text],
+            texts,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -103,7 +129,7 @@ class BgeTextEmbedder(Embedder):
             outputs = self.model(**inputs)
             features = _mean_pool(outputs.last_hidden_state, inputs["attention_mask"])
             features = self.functional.normalize(features, p=2, dim=1)
-        return features[0].detach().cpu().float().tolist()
+        return features.detach().cpu().float().tolist()
 
     def embed_image(self, image_path: Path, caption: str | None = None) -> list[float]:
         del image_path, caption

@@ -1,0 +1,7 @@
+id = "0009-product-hybrid-integration"
+title = "Unified product search over the shared hybrid coordinator"
+status = "implemented"
+components = ["backend", "frontend"]
+requirements = ["MAIN-1", "MAIN-2", "MAIN-3", "MAIN-4", "MAIN-5", "MAIN-6"]
+compatibility = "add global results; preserve old arrays/routes, one total resource limit and stable unit-ID ties"
+boundary = "local SQL adapters; no private reindex, native index/model default or runtime/deployment changes"

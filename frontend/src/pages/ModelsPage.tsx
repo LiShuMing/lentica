@@ -9,7 +9,7 @@ export function ModelsPage() {
       <header className="page-header">
         <div>
           <h1>Models</h1>
-          <p>从配置的 OpenAI-compatible 网关读取模型，只缓存安全元数据。</p>
+          <p>显示本地模型配置与依赖检测；服务健康请在 Jobs 查看。</p>
         </div>
       </header>
       {models.error ? <div className="error">{models.error.message}</div> : null}

@@ -42,6 +42,43 @@ component README/AGENTS.md, and its linked spec before editing behavior.
 - Do not commit credentials, env files, model weights, virtualenvs, screenshots,
   generated media, task records, notebook outputs, caches, binaries, or logs.
 
+## Python Engineering Standard (Google-derived)
+
+New and refactored Python code must apply the relevant guidance in the
+[Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
+especially imports (2.2), exceptions (2.4), docstrings (3.8), naming (3.16),
+function length (3.18), and type annotations (3.19).
+
+- Give each module one cohesive responsibility. Separate reusable library logic
+  from CLI parsing, filesystem output, model construction and report formatting.
+  Prefer explicit interfaces and composition; do not introduce abstractions
+  without a concrete consumer. Review functions around 40 lines for useful
+  extraction; this is guidance, not a mechanical line-count limit.
+- Use descriptive names and annotate public inputs/returns. Prefer concrete
+  domain types; use explicit `Any` only at genuinely dynamic JSON/numeric boundaries.
+  Keep optional numeric imports lazy; type-only imports belong under TYPE_CHECKING.
+- Write Google-style docstrings for public APIs and non-obvious logic. Describe
+  semantics, side effects, Args, Returns and Raises where useful; do not repeat
+  types or obvious code. Add comments for rationale and constraints.
+- Prefer importing modules to individual implementation symbols. Explicit public
+  compatibility re-exports and typing imports are allowed. Keep import groups
+  ordered; do not use wildcard imports or create circular dependencies.
+- Use built-in exceptions for invalid inputs, preserve exception causes, and
+  keep try blocks narrow. Broad catches are allowed only at documented extension
+  boundaries that translate or explicitly report arbitrary provider failures.
+  Never use production assertions as input validation or silently swallow errors.
+- Keep mutable defaults and hidden runtime side effects out of public APIs.
+  A refactor preserves public imports, CLI/API contracts, ranking/tie-breaking,
+  stored formats and failure policy unless a spec explicitly changes them.
+- Apply these rules to the touched module; avoid unrelated repository-wide style
+  churn. Match checks to risk and compare deterministic outputs for retrieval
+  refactors. Formatting alone does not demonstrate behavior compatibility.
+
+Project-specific adaptations take precedence: retain four-space indentation,
+Ruff's configured 120-character line width, component directory naming, and
+relative imports within the standard-library-only hybrid core. Do not add or
+claim a full Google/Pylint/type-checker gate without configuring and running it.
+
 ## Verification and Delivery
 
 Run `python scripts/check_workspace.py`, `python -m pytest`, and

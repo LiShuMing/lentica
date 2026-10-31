@@ -1,0 +1,5 @@
+id = "0006-multimodal-retrieval-quality"
+title = "Evidence-based retrieval quality and multimodal search"
+status = "active"
+components = ["backend"]
+requirements = ["UNIT-1", "STAGE-1", "EVIDENCE-1", "DIAG-1", "EXPERIMENT-1", "COMPAT-1"]
