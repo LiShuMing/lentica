@@ -68,6 +68,28 @@ TypeScript/Vite 构建通过。前端专项采用模拟 hooks/HTTP 和真实 API
 [0008 verification](../specs/0008-video-temporal-quality/verification.md) 和
 [0009 设计](../specs/0009-product-hybrid-integration/README.md)。根 TODO.md 保留独立的开源实现计划；发布复核后已清理外部系统映射。
 
+### 图像入库性能实验（未完成）
+
+以下针对“读取图像 → 解码/预处理 → Qwen-VL → Embedding → 索引写入”，
+需要选定真实输入和运行环境后再执行。既有 CPU 模型实验不能代替这些结论。
+
+| 实验 | 已有证据与后续验收 |
+| --- | --- |
+| 分阶段 baseline | 缺少同一批输入上读取、解码、预处理、排队、Qwen-VL、Embedding 和写入提交的独立计时；需记录各段耗时、总耗时、吞吐及 p50/p95，并分开冷启动和稳态 |
+| batch 与并发扫描 | 已有 CPU SigLIP 线程/batch 控制；GPU 上 batch/并发的吞吐拐点、排队时间与显存峰值未测，需固定模型/输入扫描并保留失败配置 |
+| 预取、有界队列、异步加载 | 尚无 CPU 准备与 GPU 计算重叠、队列积压及内存上界的实测；需比较关闭/开启配置并观测队列深度、阻塞和主存/显存峰值 |
+| 输入规格变化 | BLIP 分辨率已有 CPU 质量/成本对照；Qwen-VL 分辨率、实际视觉 token、输入/输出文本长度的性能曲线未测，需同时报告检索质量变化 |
+| 失败与恢复 | 任务所有权、重试和一致性已有测试；真实 Qwen-VL OOM、GPU 进程退出、部分写入及提交前后故障矩阵未做，需核对恢复后遗漏/重复/最终索引，不宣称 exactly-once |
+
+### 本次全部改动的范围
+
+相对基线 `1821a517443dbc4a96876bc0560f4ddcc983653f`，共 246 个文件：根目录 4、
+backend 193、docs 11、frontend 7、specs 31。包含 TODO.md、Agent 规范、
+后端一致性/抽象层/评测/测试、产品 API 与前端，以及 0002–0009 设计和验证记录。
+完整逐文件内容由 Git 提交保存，可通过
+`git diff --name-status 1821a517443dbc4a96876bc0560f4ddcc983653f HEAD` 回读；
+忽略的模型、媒体、数据库及运行工件不在此次提交范围内。
+
 ## 本次提交与推送
 
 交付前复核（2026-10-31）：最终源码完整回归 **359 passed / 54.57 秒**，5 条
@@ -82,6 +104,14 @@ Gmail 身份。远端默认分支为 `main`；推送前基线为 `1821a517443dbc
 使用 Gmail author/committer，仅对本次 Git 命令隔离不适用的企业 hooks；项目校验
 独立执行。目标为普通快进推送 `HEAD:refs/heads/main`，不 force-push。
 提交哈希与远端回读结果由完成后的交付回复提供，避免在提交中记录自身哈希。
+
+交付续核：上述 246 文件已以 Gmail 作者/提交者提交为 `9557f73`，GitHub
+`main` 回读为 `9557f732ca94cf847088ac86f24b477ff1256994`。另一次完整回归
+已退出 0：**359 passed / 54.48 秒**，同样 5 条 SWIG 警告；pip check 无损坏
+依赖，TypeScript/Vite 构建通过（1619 模块）。这些检查仍是本地 CPU/mock 和
+构建证据。检查完成后，按 `/proc` 中 Python/Node/uvicorn/vLLM/ffmpeg/npm/timeout
+进程名及本 checkout 的 cwd 核对，除核验脚本自身外未发现匹配进程；这不是端点
+健康证明。本次续交付仅补充本状态文档，不改变实现或恢复暂停的实验。
 
 ## 发布内容复核
 
