@@ -203,6 +203,21 @@ export type PhotoSearchResponse = {
   }>;
 };
 
+export type AssetSearchResponse = PhotoSearchResponse & {
+  plan: Record<string, unknown>;
+  debug: Record<string, unknown> | null;
+  document_hits: ChatResponse["sources"];
+  results: Array<{
+    file_id: number;
+    asset_type: "photo" | "screenshot" | "document";
+    rank: number;
+    score: number;
+    unit_ids: number[];
+    photo: PhotoSearchResponse["hits"][number] | null;
+    documents: ChatResponse["sources"];
+  }>;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
@@ -216,6 +231,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  searchAssets: (
+    query: string,
+    asset_types: Array<"photo" | "screenshot" | "document"> = [],
+    embedder_kind = "hash"
+  ) =>
+    request<AssetSearchResponse>("/api/v2/search", {
+      method: "POST", body: JSON.stringify({ query, asset_types, embedder_kind, device: "cpu" })
+    }),
   settings: () => request<Settings>("/api/settings"),
   models: () => request<ModelInfo[]>("/api/models"),
   sources: () => request<Source[]>("/api/library/sources"),

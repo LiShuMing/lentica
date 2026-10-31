@@ -7,13 +7,20 @@ from backend.app.evaluation.dataset import EvaluationCase
 
 
 def metrics_for_case(case: EvaluationCase, ranked_ids: list[int]) -> dict[str, float]:
+    ranked_ids = list(dict.fromkeys(ranked_ids))
     relevant = case.relevant_asset_ids
     result: dict[str, float] = {}
     for k in (1, 5, 10):
-        result[f"recall_at_{k}"] = float(bool(relevant & set(ranked_ids[:k])))
-    reciprocal_rank = next((1.0 / rank for rank, asset_id in enumerate(ranked_ids, start=1) if asset_id in relevant), 0.0)
+        found = relevant & set(ranked_ids[:k])
+        result[f"recall_at_{k}"] = len(found) / len(relevant) if relevant else 0.0
+        result[f"hit_at_{k}"] = float(bool(found))
+    reciprocal_rank = next(
+        (1.0 / rank for rank, asset_id in enumerate(ranked_ids, start=1) if asset_id in relevant), 0.0
+    )
     result["mrr"] = reciprocal_rank
-    dcg = sum(1.0 / math.log2(rank + 1) for rank, asset_id in enumerate(ranked_ids[:10], start=1) if asset_id in relevant)
+    dcg = sum(
+        1.0 / math.log2(rank + 1) for rank, asset_id in enumerate(ranked_ids[:10], start=1) if asset_id in relevant
+    )
     ideal = sum(1.0 / math.log2(rank + 1) for rank in range(1, min(10, len(relevant)) + 1))
     result["ndcg_at_10"] = dcg / ideal if ideal else 0.0
     return result

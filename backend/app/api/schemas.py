@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -199,7 +199,7 @@ class PersonUpdateRequest(BaseModel):
 
 class PhotoSearchRequest(BaseModel):
     query: str
-    limit: int = 12
+    limit: int = Field(default=12, ge=1, le=100)
     embedder_kind: str = "hash"
     embed_model: str | None = None
     text_embed_model: str | None = None
@@ -234,18 +234,42 @@ class PhotoSearchResponse(BaseModel):
 
 
 class PhotoSearchV2Request(PhotoSearchRequest):
-    asset_types: list[str] = []
+    asset_types: list[Literal["photo", "screenshot", "document"]] = Field(default_factory=list)
     debug: bool = False
+
+
+class DocumentHitInfo(BaseModel):
+    file_id: int
+    chunk_id: int
+    path: str
+    windows_path: str
+    page_or_segment: str
+    score: float
+    excerpt: str
+
+
+class AssetHitInfo(BaseModel):
+    """One resource in authoritative cross-modality order; score is raw RRF."""
+
+    file_id: int
+    asset_type: Literal["photo", "screenshot", "document"]
+    rank: int
+    score: float
+    unit_ids: list[int]
+    photo: PhotoHitInfo | None = None
+    documents: list[DocumentHitInfo] = Field(default_factory=list)
 
 
 class PhotoSearchV2Response(PhotoSearchResponse):
     plan: dict[str, Any]
     debug: dict[str, Any] | None = None
+    document_hits: list[DocumentHitInfo] = Field(default_factory=list)
+    results: list[AssetHitInfo] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
     question: str
-    limit: int = 8
+    limit: int = Field(default=8, ge=1, le=100)
 
 
 class ChatSource(BaseModel):

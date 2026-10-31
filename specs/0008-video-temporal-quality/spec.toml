@@ -1,0 +1,10 @@
+id = "0008-video-temporal-quality"
+title = "Source-grouped public multi-action video retrieval and temporal order"
+status = "active"
+components = ["backend"]
+requirements = ["VIDEO-DATA-1", "VIDEO-WINDOW-1", "VIDEO-MODEL-1", "VIDEO-ORDER-1", "VIDEO-EVAL-1", "VIDEO-COMPAT-1"]
+source = "public Charades test annotations and ZIP64 indexed original480p videos; frozen16 unique subjects before pixel/model access"
+windows = "blind4-second windows/2-second stride/tail, sixteen distinct real frames; no annotation-aligned proposals"
+models = "existing native VideoMAE CPU2 vs fixed SigLIP middle-frame baseline; six explicit native-class aliases"
+order = "bounded2-to4 ordered groups, shared filter/same resource/nonoverlap gap constraints; original intersection unchanged"
+evidence = "independent raw/clipped reference timing, unit/resource/rank/order/no-answer/cost separated; two actual runs, no default promotion assumption"

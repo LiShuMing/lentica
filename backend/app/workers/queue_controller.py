@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import signal
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -13,10 +15,16 @@ from typing import Any
 from sqlalchemy import func, select
 
 from backend.app.core.config import (
-    DATA_DIR, PROJECT_ROOT, VISION_ENDPOINT, VISION_MODEL, WORKER_PYTHON,
-    env_bool, get_settings,
+    DATA_DIR,
+    PROJECT_ROOT,
+    VISION_ENDPOINT,
+    VISION_MODEL,
+    WORKER_PYTHON,
+    env_bool,
+    get_settings,
 )
-from backend.app.db.models import ProcessingRun, ProcessingTask
+from backend.app.db.models import ProcessingTask
+from backend.app.workers.task_store import recover_expired
 from backend.app.db.session import SessionLocal
 from backend.app.workers.image_worker import enqueue_document_index, enqueue_next_face_batch, enqueue_next_photo_batch
 
@@ -54,6 +62,7 @@ class QueueController:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._workers: list[subprocess.Popen[bytes]] = []
+        self._draining: set[int] = set()
         self._last_document_enqueue = 0.0
         self._last_error: str | None = None
 
@@ -68,16 +77,19 @@ class QueueController:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=10)
         with self._lock:
             workers = list(self._workers)
         for worker in workers:
             if worker.poll() is None:
-                worker.terminate()
+                worker.send_signal(signal.SIGUSR1)
         for worker in workers:
             try:
                 worker.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 worker.kill()
+                worker.wait(timeout=5)
 
     def settings(self) -> QueueSettings:
         return load_queue_settings()
@@ -108,7 +120,12 @@ class QueueController:
         with self._lock:
             workers = self._reap_workers_locked()
             worker_status = [
-                {"pid": worker.pid, "running": worker.poll() is None, "returncode": worker.poll()}
+                {
+                    "pid": worker.pid,
+                    "running": worker.poll() is None,
+                    "returncode": worker.poll(),
+                    "draining": worker.pid in self._draining,
+                }
                 for worker in workers
             ]
         task_summary = self._task_summary()
@@ -123,31 +140,8 @@ class QueueController:
         }
 
     def _recover_interrupted_tasks(self) -> None:
-        db = SessionLocal()
-        try:
-            tasks = db.scalars(
-                select(ProcessingTask).where(
-                    ProcessingTask.pipeline_stage.in_(WORKER_STAGES),
-                    ProcessingTask.state == "running",
-                )
-            ).all()
-            now = datetime.utcnow()
-            for task in tasks:
-                run = db.scalar(
-                    select(ProcessingRun)
-                    .where(ProcessingRun.task_id == task.id, ProcessingRun.finished_at.is_(None))
-                    .order_by(ProcessingRun.id.desc())
-                )
-                if run:
-                    run.finished_at = now
-                    run.error = "Interrupted by backend restart; task requeued."
-                task.state = "queued"
-                task.worker_id = None
-                task.error = None
-            if tasks:
-                db.commit()
-        finally:
-            db.close()
+        with SessionLocal() as db:
+            recover_expired(db)
 
     def _task_summary(self) -> dict[str, dict[str, int]]:
         db = SessionLocal()
@@ -172,23 +166,35 @@ class QueueController:
     def _run_loop(self) -> None:
         while not self._stop.is_set():
             try:
+                self._recover_interrupted_tasks()
                 settings = load_queue_settings()
+                errors = []
                 if settings.enabled:
-                    self._enqueue_work(settings)
+                    errors = self._enqueue_work(settings)
                     self._reconcile_workers(settings)
                 else:
                     self._reconcile_workers(QueueSettings(enabled=False, max_concurrency=0))
-                self._last_error = None
+                self._last_error = "; ".join(errors) or None
             except Exception as exc:  # noqa: BLE001
                 self._last_error = repr(exc)
             self._stop.wait(5)
 
-    def _enqueue_work(self, settings: QueueSettings) -> None:
+    def _enqueue_work(self, settings: QueueSettings) -> list[str]:
         db = SessionLocal()
+        errors = []
+
+        def enqueue(stage, handler, payload):
+            try:
+                handler(db, payload)
+            except Exception as exc:
+                db.rollback()
+                errors.append(f"{stage}: {exc}")
+
         try:
             if settings.auto_enqueue_photos:
-                enqueue_next_photo_batch(
-                    db,
+                enqueue(
+                    "photos",
+                    enqueue_next_photo_batch,
                     {
                         "root": str(get_settings().photos_source),
                         "limit": settings.photo_limit,
@@ -212,12 +218,16 @@ class QueueController:
                     },
                 )
             if settings.auto_enqueue_faces:
-                enqueue_next_face_batch(db, {"limit": settings.face_limit, "priority": 90})
+                enqueue("faces", enqueue_next_face_batch, {"limit": settings.face_limit, "priority": 90})
             now = time.monotonic()
-            if settings.auto_enqueue_documents and now - self._last_document_enqueue >= settings.document_interval_seconds:
+            if (
+                settings.auto_enqueue_documents
+                and now - self._last_document_enqueue >= settings.document_interval_seconds
+            ):
                 if not _has_active_task(db, "index_documents"):
-                    enqueue_document_index(
-                        db,
+                    enqueue(
+                        "documents",
+                        enqueue_document_index,
                         {
                             "max_files": settings.document_max_files,
                             "max_mb": settings.document_max_mb,
@@ -226,18 +236,22 @@ class QueueController:
                     self._last_document_enqueue = now
         finally:
             db.close()
+        return errors
 
     def _reconcile_workers(self, settings: QueueSettings) -> None:
         gpu = read_gpu_status()
         desired = self._desired_concurrency(settings, gpu)
         with self._lock:
             workers = self._reap_workers_locked()
-            while len(workers) < desired:
-                workers.append(self._spawn_worker())
-            while len(workers) > desired:
-                worker = workers.pop()
+            active = [worker for worker in workers if worker.pid not in self._draining]
+            for worker in active[desired:]:
                 if worker.poll() is None:
-                    worker.terminate()
+                    worker.send_signal(signal.SIGUSR1)
+                    self._draining.add(worker.pid)
+            # Draining processes still consume memory; wait for their exit before
+            # replacing them, including a rapid pause/resume toggle.
+            while len(workers) < desired and not self._stop.is_set():
+                workers.append(self._spawn_worker())
             self._workers = workers
 
     def _desired_concurrency(self, settings: QueueSettings, gpu: dict[str, Any]) -> int:
@@ -250,7 +264,7 @@ class QueueController:
             return min(settings.max_concurrency, 2)
         if free_mb >= 8000:
             return min(settings.max_concurrency, 1)
-        return 1 if settings.auto_enqueue_documents else 0
+        return min(settings.max_concurrency, 1) if settings.auto_enqueue_documents else 0
 
     def _spawn_worker(self) -> subprocess.Popen[bytes]:
         python = WORKER_PYTHON
@@ -266,6 +280,7 @@ class QueueController:
 
     def _reap_workers_locked(self) -> list[subprocess.Popen[bytes]]:
         self._workers = [worker for worker in self._workers if worker.poll() is None]
+        self._draining.intersection_update(worker.pid for worker in self._workers)
         return self._workers
 
 
@@ -281,7 +296,15 @@ def load_queue_settings() -> QueueSettings:
 
 def save_queue_settings(settings: QueueSettings) -> None:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SETTINGS_PATH.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            json.dump(asdict(settings), stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.replace(temporary, SETTINGS_PATH)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def read_gpu_status() -> dict[str, Any]:

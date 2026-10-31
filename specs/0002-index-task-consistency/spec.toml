@@ -1,0 +1,5 @@
+id = "0002-index-task-consistency"
+title = "Resumable indexing, durable task ownership and compatible retrieval"
+status = "implemented"
+components = ["backend", "frontend"]
+requirements = ["SCAN-1", "TASK-1", "VECTOR-1", "SEARCH-1", "EVAL-1", "COMPAT-1"]

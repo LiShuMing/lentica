@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.session import Base
+from backend.app.db.search_revision import install_revision
+from backend.app.db.migrations import install_task_constraints
+
+event.listen(Base.metadata, "after_create", install_revision)
+event.listen(Base.metadata, "after_create", install_task_constraints)
 
 
 class Source(Base):
@@ -19,6 +24,16 @@ class Source(Base):
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     files: Mapped[list[File]] = relationship(back_populates="source")
+
+
+class ScanCursor(Base):
+    __tablename__ = "scan_cursors"
+    __table_args__ = (UniqueConstraint("source_id", "stage", name="uq_source_scan_stage"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
+    stage: Mapped[str] = mapped_column(String(80))
+    path: Mapped[str] = mapped_column(Text, default="")
 
 
 class File(Base):
@@ -89,6 +104,7 @@ class Image(Base):
     face_analysis_status: Mapped[str] = mapped_column(String(40), default="pending")
     face_indexed_at: Mapped[datetime | None] = mapped_column(DateTime)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    index_profile: Mapped[str | None] = mapped_column(Text)
 
 
 class PersonCluster(Base):
@@ -131,9 +147,7 @@ class FaceDetection(Base):
 
 class PhotoMetadataCandidate(Base):
     __tablename__ = "photo_metadata_candidates"
-    __table_args__ = (
-        UniqueConstraint("file_id", "kind", "value", "source", name="uq_photo_metadata_candidate"),
-    )
+    __table_args__ = (UniqueConstraint("file_id", "kind", "value", "source", name="uq_photo_metadata_candidate"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     file_id: Mapped[int] = mapped_column(ForeignKey("files.id"), index=True)
@@ -167,6 +181,7 @@ class PhotoVector(Base):
     namespace: Mapped[str] = mapped_column(String(40), index=True)
     dims: Mapped[int] = mapped_column(Integer)
     vector_json: Mapped[str] = mapped_column(Text)
+    encoder_id: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -222,6 +237,9 @@ class ProcessingTask(Base):
     worker_id: Mapped[str | None] = mapped_column(String(120))
     rate_limit_delay: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+    claim_token: Mapped[str | None] = mapped_column(String(64))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    request_key: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
 class TaskPayload(Base):

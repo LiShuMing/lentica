@@ -1,0 +1,5 @@
+id = "0005-hybrid-module-refactor"
+title = "Google-derived Python conventions and cohesive hybrid modules"
+status = "implemented"
+components = ["backend"]
+requirements = ["STYLE-1", "MODULE-1", "API-1", "CORE-1", "COMMENT-1", "VERIFY-1"]

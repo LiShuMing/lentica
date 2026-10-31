@@ -20,7 +20,7 @@ export function ChatPage() {
     <section className="page">
       <header className="page-header">
         <div>
-          <h1>Ask about your photos and documents</h1>
+          <h1>Search your documents</h1>
           <p>答案必须来自本地索引，并显示可追溯来源。</p>
         </div>
       </header>

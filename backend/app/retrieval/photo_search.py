@@ -7,15 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import extract, select
 from sqlalchemy.orm import Session
 
-from backend.app.db.models import File, Image, PhotoVector
-from backend.app.ingestion.faces import matching_person_file_ids, people_for_file
+from backend.app.db.models import File, Image, PhotoVector, Source
+from backend.app.ingestion.faces import people_for_files
 from backend.app.models.local_clip import Embedder, HashEmbedder
+from backend.app.retrieval import photo_features
 from backend.app.retrieval.fusion import RetrievalHit, weighted_rrf
-from backend.app.retrieval.query_plan import build_retrieval_plan
-
+from backend.app.retrieval.query_plan import RetrievalPlan, build_retrieval_plan
+from backend.app.retrieval.vector_store import NumpyVectorScorer, VectorScorer, score_rows
 
 YEAR_RE = re.compile(r"(20\d{2}|19\d{2})")
 TEXT_LOGICAL_NAMESPACES = [
@@ -59,6 +60,17 @@ class PhotoHit:
     exif_taken_at: str | None
 
 
+@dataclass(frozen=True)
+class PhotoCandidates:
+    """Unfused feature rankings; presentation records are not read in this stage."""
+
+    candidates: dict[int, dict[str, object]]
+    metadata: dict[int, tuple[float, list[str], list[str]]]
+    rankings: dict[str, list[RetrievalHit]]
+    weights: dict[str, float]
+    debug: dict[str, object]
+
+
 def normalize(vector: Iterable[float]) -> list[float]:
     values = [float(v) for v in vector]
     norm = math.sqrt(sum(v * v for v in values))
@@ -73,65 +85,145 @@ def cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def upsert_photo_vector(db: Session, file_id: int, namespace: str, vector: list[float]) -> None:
+def upsert_photo_vector(
+    db: Session, file_id: int, namespace: str, vector: list[float], *, encoder_id: str | None = None
+) -> None:
+    if not vector or not all(math.isfinite(value) for value in vector):
+        raise ValueError("Vectors must be non-empty and finite")
+    if namespace.startswith("hash:") and encoder_id is None:
+        encoder_id = HashEmbedder().encoder_id
     normalized = normalize(vector)
-    existing = db.scalar(
-        select(PhotoVector).where(PhotoVector.file_id == file_id, PhotoVector.namespace == namespace)
-    )
+    existing = db.scalar(select(PhotoVector).where(PhotoVector.file_id == file_id, PhotoVector.namespace == namespace))
     payload = json.dumps(normalized)
     if existing:
         existing.dims = len(normalized)
         existing.vector_json = payload
+        existing.encoder_id = encoder_id
     else:
-        db.add(PhotoVector(file_id=file_id, namespace=namespace, dims=len(normalized), vector_json=payload))
+        db.add(
+            PhotoVector(
+                file_id=file_id, namespace=namespace, dims=len(normalized), vector_json=payload, encoder_id=encoder_id
+            )
+        )
 
 
 class PhotoSearch:
-    def __init__(self, db: Session, visual_embedder: Embedder, text_embedder: Embedder | None = None):
+    def __init__(
+        self,
+        db: Session,
+        visual_embedder: Embedder,
+        text_embedder: Embedder | None = None,
+        scorer: VectorScorer | None = None,
+    ):
         self.db = db
         self.visual_embedder = visual_embedder
         self.text_embedder = text_embedder or visual_embedder
+        self.scorer = scorer or NumpyVectorScorer()
 
     def search(self, query: str, limit: int = 12) -> tuple[str, list[PhotoHit]]:
-        answer, hits, _debug = self.search_with_debug(query, limit=limit)
+        answer, hits, _debug = self.search_with_debug(query, limit=limit, asset_types=["photo", "screenshot"])
         return answer, hits
 
-    def search_with_debug(self, query: str, limit: int = 12) -> tuple[str, list[PhotoHit], dict[str, object]]:
-        plan = build_retrieval_plan(self.db, query, expand=expand_query)
+    def search_with_debug(
+        self, query: str, limit: int = 12, *, plan: RetrievalPlan | None = None, asset_types: list[str] | None = None
+    ) -> tuple[str, list[PhotoHit], dict[str, object]]:
+        plan = plan or build_retrieval_plan(self.db, query, expand=expand_query, asset_types=asset_types)
         visual_query_vector = self.visual_embedder.embed_text(plan.visual_query)
         text_query_vector = self.text_embedder.embed_text(plan.semantic_query)
         hits, retrieval_debug = self._hybrid_search(
-            query, plan.semantic_query, visual_query_vector, text_query_vector, limit=max(limit * 4, limit)
+            query, plan.semantic_query, visual_query_vector, text_query_vector, limit=limit, plan=plan
         )
-        if plan.person_file_ids:
-            scoped_hits = [hit for hit in hits if hit.file_id in plan.person_file_ids]
-            if scoped_hits:
-                hits = scoped_hits
-        if plan.years:
-            hits = [hit for hit in hits if hit.exif_taken_at and hit.exif_taken_at[:4] in plan.years]
-        hits = hits[:limit]
         retrieval_debug["plan"] = plan.debug_payload()
         retrieval_debug["final_result_count"] = len(hits)
         return self._summarize(query, hits), hits, retrieval_debug
 
     def _hybrid_search(
-        self, query: str, expanded_query: str, visual_query_vector: list[float], text_query_vector: list[float], limit: int
+        self,
+        query: str,
+        expanded_query: str,
+        visual_query_vector: list[float],
+        text_query_vector: list[float],
+        limit: int,
+        plan: RetrievalPlan,
     ) -> tuple[list[PhotoHit], dict[str, object]]:
+        prepared = self._collect_candidates(query, visual_query_vector, text_query_vector, limit, plan)
+        candidates = prepared.candidates
+        result_lists, weights = prepared.rankings, prepared.weights
+        fused = weighted_rrf(result_lists, weights=weights)
+        fused_scores = _normalize_rrf_scores(fused, weights)
+        fused_sources = {hit.asset_id: hit.sources for hit in fused}
+        hits: list[PhotoHit] = []
+        for file_id, item in candidates.items():
+            if file_id not in fused_scores:
+                continue
+            hits.append(
+                present_photo(
+                    item["file"],
+                    item["image"],
+                    prepared,
+                    plan,
+                    score=fused_scores[file_id],
+                    sources=fused_sources.get(file_id, []),
+                )
+            )
+        hits.sort(key=lambda hit: (-hit.score, -hit.confidence, hit.file_id))
+        return hits[:limit], {**prepared.debug, "rrf_candidate_count": len(fused)}
+
+    def prepare(self, query: str, *, plan: RetrievalPlan, window: int) -> PhotoCandidates:
+        """Encode once and expose bounded branch rankings to the product coordinator.
+
+        This path reads scoring/filter projections only. No legacy local fusion,
+        PhotoHit construction or final File/Image presentation load occurs.
+        """
+        if type(window) is not int or not 1 <= window <= 10000:
+            raise ValueError("Photo candidate window must be within1..10000")
+        visual = self.visual_embedder.embed_text(plan.visual_query)
+        text = self.text_embedder.embed_text(plan.semantic_query)
+        return self._collect_candidates(query, visual, text, window, plan, features_only=True)
+
+    def _collect_candidates(
+        self,
+        query: str,
+        visual_query_vector: list[float],
+        text_query_vector: list[float],
+        limit: int,
+        plan: RetrievalPlan,
+        *,
+        features_only: bool = False,
+    ) -> PhotoCandidates:
+        """Share existing scoring/filter policy across legacy and ID-first callers."""
         visual_q = normalize(visual_query_vector)
         text_q = normalize(text_query_vector)
         namespaces = _physical_namespaces(_namespace_weights(query))
         smoke_mode = isinstance(self.visual_embedder, HashEmbedder)
         if smoke_mode:
             namespaces = [f"hash:{name}" for name in _namespace_weights(query)]
-        person_file_ids, person_names = matching_person_file_ids(self.db, expanded_query)
-        rows = self.db.execute(
+        statement = (
             select(PhotoVector, File, Image)
             .join(File, File.id == PhotoVector.file_id)
             .join(Image, Image.file_id == File.id)
-            .where(PhotoVector.namespace.in_(namespaces), File.ingestion_status == "indexed")
-        ).all()
+            .join(Source, Source.id == File.source_id)
+            .where(PhotoVector.namespace.in_(namespaces), File.ingestion_status == "indexed", Source.enabled.is_(True))
+        )
+        if plan.years:
+            statement = statement.where(extract("year", Image.exif_time).in_([int(year) for year in plan.years]))
+        rows = (
+            photo_features.vector_rows(self.db, plan, namespaces)
+            if features_only
+            else self.db.execute(statement.execution_options(yield_per=256))
+        )
+        if plan.person_names:
+            rows = (row for row in rows if row[1].id in plan.person_file_ids)
         candidates: dict[int, dict[str, object]] = {}
-        for vector, file, image in rows:
+        vector_diagnostics = {}
+        for (vector, file, image), score in score_rows(
+            rows, self.visual_embedder, self.text_embedder, visual_q, text_q, self.scorer, vector_diagnostics
+        ):
+            if plan.locations and not all(location in _location_text(image) for location in plan.locations):
+                continue
+            asset_type = photo_asset_type(image)
+            if asset_type not in plan.asset_types:
+                continue
             item = candidates.setdefault(
                 file.id,
                 {
@@ -141,8 +233,6 @@ class PhotoSearch:
                     "physical_scores": {},
                 },
             )
-            query_vector = text_q if vector.namespace.startswith("bge:") else visual_q
-            score = cosine(query_vector, json.loads(vector.vector_json))
             physical_scores = item["physical_scores"]
             physical_name = _logical_namespace(vector.namespace) if smoke_mode else vector.namespace
             physical_scores[physical_name] = max(float(physical_scores.get(physical_name, 0.0)), score)
@@ -150,76 +240,92 @@ class PhotoSearch:
             namespace_scores = item["namespace_scores"]
             namespace_scores[logical_namespace] = max(float(namespace_scores.get(logical_namespace, 0.0)), score)
 
+        if plan.use_ocr_lexical:
+            # OCR is stored text, so its exact-match branch must also work when
+            # semantic vectors are missing or belong to an older encoder.
+            lexical_rows = (
+                select(File, Image)
+                .join(Image, Image.file_id == File.id)
+                .join(Source, Source.id == File.source_id)
+                .where(File.ingestion_status == "indexed", Source.enabled.is_(True), Image.ocr_text.is_not(None))
+            )
+            if plan.years:
+                lexical_rows = lexical_rows.where(
+                    extract("year", Image.exif_time).in_([int(year) for year in plan.years])
+                )
+            terms = plan.lexical_terms or list(_tokens(query))
+            lexical_features = (
+                photo_features.lexical_rows(self.db, plan)
+                if features_only
+                else self.db.execute(lexical_rows.execution_options(yield_per=256))
+            )
+            for file, image in lexical_features:
+                if file.id in candidates:
+                    continue
+                if plan.person_names and file.id not in plan.person_file_ids:
+                    continue
+                if plan.locations and not all(location in _location_text(image) for location in plan.locations):
+                    continue
+                if photo_asset_type(image) not in plan.asset_types:
+                    continue
+                if not any(term.lower() in image.ocr_text.lower() for term in terms):
+                    continue
+                candidates[file.id] = {
+                    "file": file,
+                    "image": image,
+                    "namespace_scores": {},
+                    "physical_scores": {},
+                }
+
+        people_by_file = people_for_files(self.db, list(candidates))
         metadata_by_file: dict[int, tuple[float, list[str], list[str]]] = {}
         for file_id, item in candidates.items():
             file = item["file"]
             image = item["image"]
             tags = json.loads(image.tags or "[]")
             context = _parse_context(image.context_json)
-            people_text = " ".join(_person_terms(people_for_file(self.db, file_id)))
+            people_text = " ".join(_person_terms(people_by_file.get(file_id, [])))
             metadata_by_file[file_id] = _metadata_score(query, file, image, tags, context, people_text)
 
         result_lists = _independent_retrieval_lists(candidates, metadata_by_file, limit=max(limit, 50))
-        fused = weighted_rrf(result_lists, weights=_retriever_weights(query))
-        fused_scores = _normalize_rrf_scores(fused, _retriever_weights(query))
-        fused_sources = {hit.asset_id: hit.sources for hit in fused}
-        hits: list[PhotoHit] = []
-        for file_id, item in candidates.items():
-            if file_id not in fused_scores:
-                continue
-            file = item["file"]
-            image = item["image"]
-            tags = json.loads(image.tags or "[]")
-            context = _parse_context(image.context_json)
-            namespace_scores = {key: round(float(value), 6) for key, value in item["namespace_scores"].items()}
-            metadata_score, metadata_hits, matched_terms = metadata_by_file[file_id]
-            if file_id in person_file_ids:
-                metadata_score = max(metadata_score, 1.0)
-                metadata_hits.append("person_cluster")
-                matched_terms.extend(person_names)
-            image_score = float(namespace_scores.get("image", 0.0))
-            text_score = max(
-                float(namespace_scores.get(name, 0.0))
-                for name in TEXT_LOGICAL_NAMESPACES
-            )
-            score = fused_scores[file_id]
-            confidence = _confidence(score, image_score, text_score, metadata_score)
-            hits.append(
-                PhotoHit(
-                    file_id=file_id,
-                    score=round(score, 6),
-                    confidence=confidence,
-                    image_score=round(image_score, 6),
-                    text_score=round(text_score, 6),
-                    metadata_score=round(metadata_score, 6),
-                    namespace_scores=namespace_scores,
-                    matched_terms=matched_terms,
-                    match_reason=_match_reason(
-                        image_score,
-                        text_score,
-                        metadata_hits,
-                        namespace_scores,
-                        fused_sources.get(file_id, []),
-                    ),
-                    path=file.canonical_path,
-                    windows_path=file.windows_path,
-                    file_name=Path(file.canonical_path).name,
-                    thumb_path=image.thumb_path,
-                    caption=image.caption,
-                    dense_caption=str(context.get("dense_caption") or image.caption or ""),
-                    ocr_text=image.ocr_text,
-                    context=context,
-                    tags=tags,
-                    exif_taken_at=image.exif_time.isoformat() if image.exif_time else None,
-                )
-            )
-        hits.sort(key=lambda hit: (hit.score, hit.confidence), reverse=True)
-        return hits[:limit], {
-            "candidate_count": len(candidates),
-            "retriever_counts": {source: len(items) for source, items in result_lists.items()},
-            "rrf_candidate_count": len(fused),
-            "retriever_weights": _retriever_weights(query),
+        enabled = {
+            "visual": plan.use_visual,
+            "caption": plan.use_caption_dense,
+            "context": plan.use_context_dense,
+            "ocr_dense": plan.use_ocr_dense,
+            "metadata": True,
         }
+        result_lists = {name: values for name, values in result_lists.items() if enabled.get(name, False)}
+        if plan.use_ocr_lexical:
+            lexical = []
+            for file_id, item in candidates.items():
+                ocr_text = (item["image"].ocr_text or "").lower()
+                terms = plan.lexical_terms or list(_tokens(query))
+                score = sum(term.lower() in ocr_text for term in terms)
+                if score:
+                    lexical.append((file_id, float(score)))
+            result_lists["ocr_lexical"] = [
+                RetrievalHit(file_id, rank, score, "ocr_lexical")
+                for rank, (file_id, score) in enumerate(
+                    sorted(lexical, key=lambda row: (-row[1], row[0]))[: max(limit, 50)], 1
+                )
+            ]
+        weights = _retriever_weights(query)
+        if plan.use_ocr_lexical:
+            weights["ocr_lexical"] = 1.2
+        weights = {name: weights[name] for name in result_lists}
+        return PhotoCandidates(
+            candidates,
+            metadata_by_file,
+            result_lists,
+            weights,
+            {
+                "vector_scoring": vector_diagnostics,
+                "candidate_count": len(candidates),
+                "retriever_counts": {source: len(items) for source, items in result_lists.items()},
+                "retriever_weights": weights,
+            },
+        )
 
     def _summarize(self, query: str, hits: list[PhotoHit]) -> str:
         if not hits:
@@ -230,6 +336,64 @@ class PhotoSearch:
             caption = hit.caption or hit.file_name
             lines.append(f"{idx}. {when}confidence {hit.confidence:.2f}，{caption[:120]}")
         return "\n".join(lines)
+
+
+def photo_asset_type(image: Image | photo_features.ImageFeature) -> str:
+    """Read the stored asset kind using the legacy malformed-context fallback."""
+    return str(_parse_context(image.context_json).get("asset_type") or "photo")
+
+
+def present_photo(
+    file: File,
+    image: Image,
+    prepared: PhotoCandidates,
+    plan: RetrievalPlan,
+    *,
+    score: float,
+    sources: list[str],
+) -> PhotoHit:
+    """Format one final selected record using separately prepared ranking features."""
+    file_id = file.id
+    item = prepared.candidates[file_id]
+    tags = json.loads(image.tags or "[]")
+    context = _parse_context(image.context_json)
+    namespace_scores = {key: round(float(value), 6) for key, value in item["namespace_scores"].items()}
+    metadata_score, original_hits, original_terms = prepared.metadata[file_id]
+    metadata_hits, matched_terms = list(original_hits), list(original_terms)
+    if file_id in plan.person_file_ids:
+        metadata_score = max(metadata_score, 1.0)
+        metadata_hits.append("person_cluster")
+        matched_terms.extend(plan.person_names)
+    image_score = float(namespace_scores.get("image", 0.0))
+    text_score = max(float(namespace_scores.get(name, 0.0)) for name in TEXT_LOGICAL_NAMESPACES)
+    confidence = _confidence(score, image_score, text_score, metadata_score)
+    return PhotoHit(
+        file_id=file_id,
+        score=round(score, 6),
+        confidence=confidence,
+        image_score=round(image_score, 6),
+        text_score=round(text_score, 6),
+        metadata_score=round(metadata_score, 6),
+        namespace_scores=namespace_scores,
+        matched_terms=matched_terms,
+        match_reason=_match_reason(
+            image_score,
+            text_score,
+            metadata_hits,
+            namespace_scores,
+            sources,
+        ),
+        path=file.canonical_path,
+        windows_path=file.windows_path,
+        file_name=Path(file.canonical_path).name,
+        thumb_path=image.thumb_path,
+        caption=image.caption,
+        dense_caption=str(context.get("dense_caption") or image.caption or ""),
+        ocr_text=image.ocr_text,
+        context=context,
+        tags=tags,
+        exif_taken_at=image.exif_time.isoformat() if image.exif_time else None,
+    )
 
 
 def _metadata_score(
@@ -389,28 +553,30 @@ def _independent_retrieval_lists(
         visual = _best_physical_score(physical, lambda name: name in {"image", "clip:image"})
         caption = _best_physical_score(
             physical,
-            lambda name: name in {"bge:caption", "bge:dense_caption", "caption", "dense_caption"},
+            lambda name: _logical_namespace(name) in {"caption", "dense_caption"},
         )
         ocr = _best_physical_score(physical, lambda name: name in {"bge:ocr", "ocr", "clip:ocr"})
         context = _best_physical_score(
             physical,
-            lambda name: name
-            in {
-                "bge:text",
-                "bge:tags",
-                "bge:objects",
-                "bge:people",
-                "bge:activities",
-                "bge:visual_attributes",
-                "bge:search_phrases",
-                "text",
-                "tags",
-                "objects",
-                "people",
-                "activities",
-                "visual_attributes",
-                "search_phrases",
-            },
+            lambda name: (
+                _logical_namespace(name)
+                in {
+                    "bge:text",
+                    "bge:tags",
+                    "bge:objects",
+                    "bge:people",
+                    "bge:activities",
+                    "bge:visual_attributes",
+                    "bge:search_phrases",
+                    "text",
+                    "tags",
+                    "objects",
+                    "people",
+                    "activities",
+                    "visual_attributes",
+                    "search_phrases",
+                }
+            ),
         )
         if visual is not None:
             source_scores["visual"].append((file_id, visual))
@@ -512,7 +678,9 @@ def classify_query_intent(query: str) -> set[str]:
     intent: set[str] = set()
     if re.search(r"\d{2,}|编号|文字|写着|截图|票|证|单|码|ocr|发票|收据|证件|文档", lowered):
         intent.add("ocr")
-    if YEAR_RE.search(query) or re.search(r"昨天|今天|去年|今年|月份|春节|生日|假期|周末|晚上|夜晚|白天|早上|下午|夏天|冬天", query):
+    if YEAR_RE.search(query) or re.search(
+        r"昨天|今天|去年|今年|月份|春节|生日|假期|周末|晚上|夜晚|白天|早上|下午|夏天|冬天", query
+    ):
         intent.add("time")
     if re.search(r"哪里|地点|城市|上海|北京|成都|杭州|海边|山|公园|餐厅|酒店|学校|公司|机场|车站|家里", query):
         intent.add("location")
@@ -591,3 +759,17 @@ def _as_text_list(value: object) -> list[str]:
     if value:
         return [str(value)]
     return []
+
+
+def _location_text(image: Image) -> str:
+    context = _parse_context(image.context_json)
+    metadata = context.get("metadata") or {}
+    observations = context.get("observations") or {}
+    return " ".join(
+        [
+            image.location or "",
+            str(metadata.get("city") or ""),
+            str(metadata.get("location_name") or ""),
+            " ".join(observations.get("scenes") or []),
+        ]
+    )

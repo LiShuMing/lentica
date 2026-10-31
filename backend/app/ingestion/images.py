@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from backend.app.ingestion.traversal import iter_source_files
+
 
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif"}
 
@@ -23,9 +25,7 @@ class ImageMeta:
 
 
 def iter_image_files(root: Path) -> Iterable[Path]:
-    for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGES and not path.name.startswith("._"):
-            yield path
+    yield from iter_source_files(root, SUPPORTED_IMAGES)
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:

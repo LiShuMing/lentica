@@ -1,0 +1,5 @@
+id = "0003-hybrid-search-layer"
+title = "Independent hybrid retrieval contracts and reproducible evaluation"
+status = "implemented"
+components = ["backend"]
+requirements = ["CORE-1", "FUSE-1", "FILTER-1", "FETCH-1", "FAIL-1", "EVAL-1", "COMPAT-1"]
