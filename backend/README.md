@@ -46,6 +46,13 @@ process cancellation are not activated by this integration. No reindex is needed
 From the root: `python -m pytest backend/tests`. Start with the selected Python:
 `python -m uvicorn backend.app.main:app --env-file .env --host 127.0.0.1 --port 8000`.
 
+[0010 project benchmarks](../specs/0010-project-benchmark/README.md) measure the
+actual product document path, synthetic vector scan scale, bounded public-text
+ingestion, mixed-ranking stress controls and in-process ASGI requests. Run
+`python -m backend.app.evaluation.product_benchmark --help` for explicit inputs
+and fresh work/output paths. No private database, model download, background
+controller or product-default change is part of these offline commands.
+
 
 Spec0007 adds optional source-isolated fast/slow image-gate and Chinese-query
 adaptation experiments. Use `python -m backend.app.evaluation.cascade_benchmark

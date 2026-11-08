@@ -57,3 +57,8 @@ kind = "learning"
 access = "gpu-opt-in"
 spec = "specs/0001-agentic-workspace"
 check = "python -m pytest tests/test_learning.py"
+
+[benchmarks.project]
+spec = "specs/0010-project-benchmark"
+entrypoint = "python -m backend.app.evaluation.product_benchmark --help"
+access = "explicit-public-synthetic-cpu"

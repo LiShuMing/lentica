@@ -1,7 +1,27 @@
 # Agent Development Rules
 
-Lentica is a spec-driven workspace. Read this file, `workspace.toml`, the applicable
-component README/AGENTS.md, and its linked spec before editing behavior.
+Lentica is a spec-driven workspace. At the start of every task, read this file and
+[RULES.md](RULES.md). Read `workspace.toml`, the applicable component README/AGENTS.md,
+and its linked spec before editing behavior.
+
+## Mandatory Commit Identity and Publication Rules
+
+[RULES.md](RULES.md) is mandatory for every Agent and every directory in this
+repository. Scoped instructions must not weaken it. Before every commit/amend and
+history rewrite or push, reread it and apply its identity, content and publication
+checks:
+
+- Both author and committer must be `shuming.li <ming.moriarty@gmail.com>`; verify
+  the effective identity and the stored commit, not just Git configuration.
+- Keep commit messages concise; omit enterprise templates and Gerrit `Change-Id`.
+  Follow RULES.md for history backups and the repository-local hooks isolation.
+- Never publish non-public Alibaba/ODPS/MaxCompute or other organizational
+  material, internal APIs/design mappings, or real passwords, tokens and keys.
+  Verifiable public documentation, public APIs and open-source material are allowed.
+- Review staged content, complete commit snapshots, metadata and every outgoing
+  commit; verify public provenance and investigate findings without printing secrets.
+- Keep publication authorization separate. History rewriting requires explicit
+  authorization and an exact-SHA lease; ordinary push authority does not include it.
 
 ## Spec Before Implementation
 

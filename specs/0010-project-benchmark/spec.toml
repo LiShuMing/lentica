@@ -1,0 +1,7 @@
+id = "0010-project-benchmark"
+title = "Project-wide numerical benchmark evidence"
+status = "implemented"
+components = ["backend", "frontend", "media-workflow", "multimodal-agent", "vllm", "gpu", "gpu-llm"]
+requirements = ["BENCH-1", "BENCH-2", "BENCH-3", "BENCH-4", "BENCH-5"]
+compatibility = "add isolated offline measurement only; preserve product APIs, defaults and data"
+boundary = "explicit public/synthetic CPU inputs; no private-library, GPU, cloud or GUI execution"

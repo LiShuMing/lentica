@@ -9,6 +9,15 @@ behavior. Link requirement IDs and record acceptance results in verification.md.
 Run `python scripts/check_workspace.py`; behavior-changing PRs also need a spec
 update, checked in CI against their base revision.
 
+Read and follow [RULES.md](RULES.md) for every contribution. Both Git author and
+committer must use the specified personal Gmail identity. Non-public organizational
+material, internal APIs/design mappings and real credentials must never be published;
+verifiable public documentation, public APIs and open-source material are allowed.
+Run the staged-content, stored-commit and outgoing-history reviews described there.
+Keep commit messages to a clear subject and, only when needed, a short body.
+Omit enterprise templates and Gerrit `Change-Id`; keep detailed validation in the
+relevant spec or review description. Check the stored message after committing.
+
 Install `.[dev]`, run `python -m pytest`, `ruff check backend scripts tests apps examples services labs learning`, and the frontend
 build. Add tests for cross-module behavior; avoid tests that only restate constants.
 GPU/model tests are optional locally but must be reported explicitly when relevant.
