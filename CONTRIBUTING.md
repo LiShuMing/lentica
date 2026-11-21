@@ -8,6 +8,9 @@ scoped rules. Create/update a numbered [spec](specs/README.md) before changing
 behavior. Link requirement IDs and record acceptance results in verification.md.
 Run `python scripts/check_workspace.py`; behavior-changing PRs also need a spec
 update, checked in CI against their base revision.
+Use the [review report](docs/reviews/2026-10-28.md) and
+[reliability backlog](docs/roadmap/reliability.md) to choose the next small slice.
+Preserve the documented [operations](docs/operations.md) and failure contracts.
 
 Read and follow [RULES.md](RULES.md) for every contribution. Both Git author and
 committer must use the specified personal Gmail identity. Non-public organizational

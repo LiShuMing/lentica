@@ -5,6 +5,12 @@
 > architecture for a future project-level Context Pack workflow. Follow the root
 > README and configuration docs for running the released implementation.
 
+Current maintenance work is tracked in the
+[reliability and retrieval backlog](reliability.md), with concrete acceptance
+criteria from the [workspace review](../reviews/2026-10-28.md). The historical
+startup instructions below are archived context, not active execution directions;
+root AGENTS.md, workspace.toml, and numbered specs govern all new changes.
+
 版本：v0.1 / 2026-10-25。状态：可开发规格，尚非已实现功能。
 
 给 WSL Codex：先阅读本文件，再按下列顺序阅读规格，在现有项目上增量开发。先交付四周 P0；第五至六周扩 Notion。不要把整套历史照片路线、云 SaaS 和所有连接器同时纳入首发。

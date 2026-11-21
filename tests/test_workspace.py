@@ -58,6 +58,7 @@ def test_behavior_change_requires_numbered_spec():
         == []
     )
     assert check_change_spec(["README.md"]) == []
+    assert check_change_spec(["learning/gpu-llm/lesson.ipynb"])
 
 
 def test_import_filter_excludes_environments_outputs_and_native_binary(tmp_path):

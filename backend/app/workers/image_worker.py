@@ -235,6 +235,8 @@ class ImageWorker:
                 output = handler(db, payload)
                 stats = output if isinstance(output, dict) else output.__dict__
                 failed = int(stats.get("failed", stats.get("failed_files", 0)))
+                if task.pipeline_stage == "index_faces":
+                    failed += int(stats.get("face_unavailable", 0))
                 error = stats.get("error")
                 if failed or stats.get("status") == "failed":
                     error = error or f"{failed} item(s) failed; see run statistics"
@@ -459,6 +461,7 @@ class ImageWorker:
                     stats.skipped += 1
                 elif face_stats.error:
                     stats.failed += 1
+                    self.logger.error("face_index_failed file_id=%s error=%s", file.id, face_stats.error)
                 else:
                     stats.indexed += 1
                     image = db.scalar(select(Image).where(Image.file_id == file.id))

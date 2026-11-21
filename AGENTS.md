@@ -111,6 +111,8 @@ The change checker requires both spec content/metadata and its verification reco
 to change together for a behavior-changing PR; a template-only edit is insufficient.
 CI defaults to CPU/mock checks. Real GUI/cloud/GPU runs require an explicitly
 selected task, input, and environment; migration itself does not authorize them.
+Before queue/index/retrieval changes, consult `docs/operations.md` and
+`docs/roadmap/reliability.md`; preserve documented failure and recovery contracts.
 
 Summarize the spec IDs, code changes, checks, and limits. Commit/push when the user
 asks or existing task authorization covers it; never infer permission to publish

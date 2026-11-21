@@ -30,6 +30,13 @@ Face runtime also requires `LENTICA_ENABLE_FACES=true` even for manual jobs.
 Maximum concurrency defaults to 4. Automatic GPU adjustment can choose fewer
 workers; absence of `nvidia-smi` is reported in queue status. Smoke mode can run
 without GPU tooling. Hash embeddings only test storage/queue flow.
+Zero concurrency starts no consumers; enabled auto-enqueue can still create tasks.
+Invalid persisted settings fail explicitly rather than enabling defaults;
+see [operations](operations.md) for draining, lease recovery, and settings recovery.
+
+Document batch limits bound files visited per call and persist a scan cursor per
+source so repeated bounded scans advance through the library and wrap after
+completing a traversal.
 
 Changing an encoder requires rebuilding matching namespaces. Do not mix vectors
 from different encoders merely because they have the same dimension.

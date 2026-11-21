@@ -128,7 +128,7 @@ def check_change_spec(paths: list[str]) -> list[str]:
                     ".github/workflows/",
                 )
             )
-            and Path(name).suffix not in {".md", ".ipynb"}
+            and Path(name).suffix != ".md"
         )
         or name in {"pyproject.toml", "workspace.toml"}
         for name in paths

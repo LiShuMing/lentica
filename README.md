@@ -57,6 +57,7 @@ cd lentica
 # Activate an existing virtualenv, or create your preferred environment.
 python -m pip install -e '.[dev]'
 cp .env.example .env
+mkdir -p library/documents library/photos
 ```
 
 Edit `.env` to choose your source directories. The example uses CPU smoke mode
@@ -79,7 +80,9 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Open <http://127.0.0.1:5173>. API documentation is at
 <http://127.0.0.1:8000/docs>. The backend starts the queue controller automatically;
-the Jobs page can pause processing and adjust concurrency.
+the Jobs page controls processing and concurrency. Read the
+[operations runbook](docs/operations.md) for draining, recovery, and backup
+guidance before interrupting an active build.
 
 For the CPU-first example, select **Smoke: basic + hash** on the Photos page
 before queuing or searching images. Document search requires no model setup.
@@ -142,6 +145,8 @@ evaluation; no accuracy or latency gains are claimed by these smoke tests.
 The existing `backend.app.*` module namespace and API routes are retained to keep
 the migration narrow. See [architecture](docs/architecture.md),
 [configuration](docs/configuration.md), [migration](docs/migration.md),
+[operations](docs/operations.md), [review findings](docs/reviews/2026-10-28.md),
+[improvement backlog](docs/roadmap/reliability.md),
 [contributing](CONTRIBUTING.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## License

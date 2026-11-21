@@ -255,7 +255,7 @@ class QueueController:
             self._workers = workers
 
     def _desired_concurrency(self, settings: QueueSettings, gpu: dict[str, Any]) -> int:
-        if not settings.enabled:
+        if not settings.enabled or settings.max_concurrency <= 0:
             return 0
         if not settings.auto_adjust_concurrency or settings.worker_mode != "gpu":
             return settings.max_concurrency
@@ -289,21 +289,32 @@ def load_queue_settings() -> QueueSettings:
         save_queue_settings(QueueSettings())
     try:
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        return QueueSettings(**{**asdict(QueueSettings()), **data})
-    except Exception:
-        return QueueSettings()
+        defaults = asdict(QueueSettings())
+        if not isinstance(data, dict):
+            raise ValueError("Settings must be a JSON object")
+        for key, value in data.items():
+            if key not in defaults or type(value) is not type(defaults[key]):
+                raise ValueError(f"Invalid queue setting: {key}")
+        settings = QueueSettings(**{**defaults, **data})
+        if not 0 <= settings.max_concurrency <= 4:
+            raise ValueError("max_concurrency must be between 0 and 4")
+        return settings
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid queue settings at {SETTINGS_PATH}; refusing to enable defaults") from exc
 
 
 def save_queue_settings(settings: QueueSettings) -> None:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SETTINGS_PATH.parent, delete=False) as stream:
-        temporary = Path(stream.name)
-        try:
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SETTINGS_PATH.parent, delete=False) as stream:
+            temporary = Path(stream.name)
             json.dump(asdict(settings), stream, ensure_ascii=False, indent=2)
             stream.flush()
             os.fsync(stream.fileno())
-            os.replace(temporary, SETTINGS_PATH)
-        finally:
+        os.replace(temporary, SETTINGS_PATH)
+    finally:
+        if temporary is not None:
             temporary.unlink(missing_ok=True)
 
 
