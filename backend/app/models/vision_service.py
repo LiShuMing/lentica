@@ -93,13 +93,18 @@ class FallbackVisionClient(VisionServiceClient):
         self.primary = primary
         self._fallback_factory = fallback_factory
         self._fallback: VisionServiceClient | None = None
+        self.last_used_fallback: bool = False
+        self.fallback_count: int = 0
 
     def analyze_photo(self, image_path: Path) -> dict[str, object]:
+        self.last_used_fallback = False
         try:
             return self.primary.analyze_photo(image_path)
         except VisionServiceUnavailable:
             if self._fallback is None:
                 self._fallback = self._fallback_factory()
+            self.last_used_fallback = True
+            self.fallback_count += 1
             return self._fallback.analyze_photo(image_path)
 
 
@@ -185,17 +190,21 @@ def validate_local_endpoint(endpoint: str) -> str:
 
 def _image_data_url(image_path: Path, max_pixels: int) -> str:
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
 
-        with Image.open(image_path) as image:
-            image.load()
-            if image.width * image.height <= max_pixels:
+        with Image.open(image_path) as raw:
+            raw.load()
+            orientation = raw.getexif().get(274, 1) if raw.getexif() else 1
+            if raw.width * raw.height <= max_pixels and orientation == 1:
                 mime = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
                 encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
                 return f"data:{mime};base64,{encoded}"
 
-            resized = image.copy()
-            resized.thumbnail(_max_size(image.width, image.height, max_pixels))
+            resized = ImageOps.exif_transpose(raw)
+            if resized is raw:
+                resized = raw.copy()
+            if resized.width * resized.height > max_pixels:
+                resized.thumbnail(_max_size(resized.width, resized.height, max_pixels))
             if resized.mode not in {"RGB", "L"}:
                 resized = resized.convert("RGB")
             buffer = io.BytesIO()

@@ -52,7 +52,7 @@ def enqueue_task(db, stage: str, payload: dict, *, priority: int = 100) -> Proce
     return task
 
 
-def recover_expired(db, *, now: datetime | None = None, max_attempts: int = 5) -> int:
+def recover_expired(db, *, now: datetime | None = None, max_attempts: int = 5, backoff_seconds: int = 0) -> int:
     now = now or datetime.utcnow()
     tasks = db.scalars(
         select(ProcessingTask).where(
@@ -64,6 +64,10 @@ def recover_expired(db, *, now: datetime | None = None, max_attempts: int = 5) -
     for task in tasks:
         exhausted = task.attempt_count >= max_attempts
         error = "Worker lease expired; retry limit reached." if exhausted else "Worker lease expired; task requeued."
+        next_attempt = None
+        if not exhausted and backoff_seconds > 0:
+            delay = backoff_seconds * (2 ** max(0, int(task.attempt_count or 1) - 1))
+            next_attempt = now + timedelta(seconds=delay)
         result = db.execute(
             update(ProcessingTask)
             .where(
@@ -76,6 +80,7 @@ def recover_expired(db, *, now: datetime | None = None, max_attempts: int = 5) -
                 worker_id=None,
                 claim_token=None,
                 lease_expires_at=None,
+                next_attempt_at=next_attempt,
                 error=error if exhausted else None,
             )
         )

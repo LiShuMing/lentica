@@ -6,6 +6,7 @@ import { api, TaskInfo } from "../api/client";
 export function JobsPage() {
   const queryClient = useQueryClient();
   const previousStates = useRef<Map<number, string>>(new Map());
+  const latestTasksUpdatedAt = useRef<number>(0);
   const [changedIds, setChangedIds] = useState<Set<number>>(new Set());
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 2500 });
   const queue = useQuery({ queryKey: ["queue-status"], queryFn: api.queueStatus, refetchInterval: 2500 });
@@ -55,22 +56,42 @@ export function JobsPage() {
   const cancelTask = useMutation({ mutationFn: api.cancelTask, onSuccess: refreshTasks });
   const retryTask = useMutation({ mutationFn: api.retryTask, onSuccess: refreshTasks });
   const taskRows = useMemo(() => tasks.data ?? [], [tasks.data]);
+  const tasksUpdatedAt = tasks.dataUpdatedAt ?? 0;
 
   useEffect(() => {
+    if (tasksUpdatedAt > 0 && tasksUpdatedAt < latestTasksUpdatedAt.current) {
+      return;
+    }
+    if (tasksUpdatedAt > 0) {
+      latestTasksUpdatedAt.current = tasksUpdatedAt;
+    }
     const nextChanged = new Set<number>();
+    const activeIds = new Set<number>();
     for (const task of taskRows) {
+      activeIds.add(task.id);
       const previous = previousStates.current.get(task.id);
       if (previous && previous !== task.state) {
         nextChanged.add(task.id);
       }
       previousStates.current.set(task.id, task.state);
     }
+    for (const trackedId of Array.from(previousStates.current.keys())) {
+      if (!activeIds.has(trackedId)) {
+        previousStates.current.delete(trackedId);
+      }
+    }
     if (nextChanged.size > 0) {
       setChangedIds(nextChanged);
       const timer = window.setTimeout(() => setChangedIds(new Set()), 2200);
       return () => window.clearTimeout(timer);
     }
-  }, [taskRows]);
+  }, [taskRows, tasksUpdatedAt]);
+
+  const degradedRuns = taskRows.filter((task) => isDegradedRun(task)).length;
+  const isDegraded =
+    (vision.data != null && !vision.data.healthy) ||
+    degradedRuns > 0 ||
+    Boolean(queue.data?.last_error);
 
   return (
     <section className="page">
@@ -80,7 +101,7 @@ export function JobsPage() {
           <p>本地 worker 队列、运行状态、错误和最近输出。</p>
         </div>
         <div className="button-row">
-          <button onClick={() => enqueueNext.mutate()} disabled={enqueueNext.isPending}>
+          <button onClick={() => enqueueNext.mutate()} disabled={enqueueNext.isPending || Boolean(queue.error)}>
             <Play size={18} />
             <span>Queue next photos</span>
           </button>
@@ -90,6 +111,45 @@ export function JobsPage() {
           </button>
         </div>
       </header>
+      {queue.error ? (
+        <div className="error" role="alert">
+          Queue configuration/status error: {formatError(queue.error)}
+        </div>
+      ) : null}
+      {tasks.error ? (
+        <div className="error" role="alert">
+          Task list error: {formatError(tasks.error)}
+        </div>
+      ) : null}
+      {vision.error ? (
+        <div className="error" role="alert">
+          Vision status error: {formatError(vision.error)}
+        </div>
+      ) : null}
+      {updateQueue.error ? (
+        <div className="error" role="alert">
+          Failed to update queue settings: {formatError(updateQueue.error)}
+        </div>
+      ) : null}
+      {cancelTask.error ? (
+        <div className="error" role="alert">
+          Failed to cancel task: {formatError(cancelTask.error)}
+        </div>
+      ) : null}
+      {retryTask.error ? (
+        <div className="error" role="alert">
+          Failed to retry task: {formatError(retryTask.error)}
+        </div>
+      ) : null}
+      {isDegraded ? (
+        <div className="status-line" role="status">
+          Degraded mode active:
+          {vision.data && !vision.data.healthy ? " vision service unavailable;" : ""}
+          {degradedRuns > 0 ? ` ${degradedRuns} run(s) used fallback;` : ""}
+          {queue.data?.last_error ? ` controller reported ${queue.data.last_error}` : ""}
+        </div>
+      ) : null}
+      {queue.isLoading && !queue.data ? <div className="status-line">Loading queue status...</div> : null}
       {queue.data ? (
         <div className="queue-panel">
           <div className="setting-row compact">
@@ -98,6 +158,7 @@ export function JobsPage() {
               <input
                 type="checkbox"
                 checked={queue.data.settings.enabled}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ enabled: event.target.checked })}
               />
               <strong>{queue.data.settings.enabled ? "on" : "off"}</strong>
@@ -110,6 +171,7 @@ export function JobsPage() {
                 <input
                   type="checkbox"
                   checked={queue.data.settings.auto_enqueue_photos}
+                  disabled={updateQueue.isPending}
                   onChange={(event) => updateQueue.mutate({ auto_enqueue_photos: event.target.checked })}
                 />
                 <strong>photos</strong>
@@ -118,6 +180,7 @@ export function JobsPage() {
                 <input
                   type="checkbox"
                   checked={queue.data.settings.auto_enqueue_documents}
+                  disabled={updateQueue.isPending}
                   onChange={(event) => updateQueue.mutate({ auto_enqueue_documents: event.target.checked })}
                 />
                 <strong>documents</strong>
@@ -129,6 +192,7 @@ export function JobsPage() {
             <div className="button-row">
               <select
                 value={queue.data.settings.worker_mode}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ worker_mode: event.target.value })}
               >
                 <option value="gpu">GPU: Qwen-VL + CLIP</option>
@@ -138,6 +202,7 @@ export function JobsPage() {
                 <input
                   type="checkbox"
                   checked={queue.data.settings.auto_adjust_concurrency}
+                  disabled={updateQueue.isPending}
                   onChange={(event) => updateQueue.mutate({ auto_adjust_concurrency: event.target.checked })}
                 />
                 <strong>auto</strong>
@@ -148,6 +213,7 @@ export function JobsPage() {
                 min={0}
                 max={4}
                 value={queue.data.settings.max_concurrency}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ max_concurrency: Number(event.target.value) })}
               />
             </div>
@@ -157,6 +223,7 @@ export function JobsPage() {
             <div className="button-row">
               <select
                 value={queue.data.settings.vision_backend}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ vision_backend: event.target.value })}
               >
                 <option value="vllm">vLLM service</option>
@@ -165,6 +232,7 @@ export function JobsPage() {
               </select>
               <select
                 value={queue.data.settings.vision_fallback}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ vision_fallback: event.target.value })}
               >
                 <option value="transformers">fallback transformers</option>
@@ -174,6 +242,7 @@ export function JobsPage() {
               <input
                 className="endpoint-input"
                 value={queue.data.settings.vision_endpoint}
+                disabled={updateQueue.isPending}
                 onChange={(event) => updateQueue.mutate({ vision_endpoint: event.target.value })}
               />
             </div>
@@ -204,8 +273,12 @@ export function JobsPage() {
         </div>
       ) : null}
       {enqueueNext.data ? <div className="status-line">{enqueueNext.data.message}</div> : null}
-      {enqueueNext.error ? <div className="error">{enqueueNext.error.message}</div> : null}
-      {enqueueDocs.error ? <div className="error">{enqueueDocs.error.message}</div> : null}
+      {enqueueNext.error ? <div className="error">{formatError(enqueueNext.error)}</div> : null}
+      {enqueueDocs.error ? <div className="error">{formatError(enqueueDocs.error)}</div> : null}
+      {tasks.isLoading && !tasks.data ? <div className="status-line">Loading tasks...</div> : null}
+      {!tasks.isLoading && !tasks.error && taskRows.length === 0 ? (
+        <div className="status-line">No queued or historical tasks yet.</div>
+      ) : null}
       <div className="table-block">
         <table>
           <thead>
@@ -231,6 +304,7 @@ export function JobsPage() {
                 <td>{task.pipeline_stage}</td>
                 <td>
                   <span className={`state-pill ${task.state}`}>{task.state}</span>
+                  {isDegradedRun(task) ? <span className="state-pill failed">fallback</span> : null}
                 </td>
                 <td>{formatDate(task.latest_run?.started_at)}</td>
                 <td>{formatDate(task.latest_run?.finished_at)}</td>
@@ -242,12 +316,22 @@ export function JobsPage() {
                 <td>
                   <div className="row-actions">
                     {task.state === "queued" ? (
-                      <button className="icon-button" title="Cancel task" onClick={() => cancelTask.mutate(task.id)}>
+                      <button
+                        className="icon-button"
+                        title="Cancel task"
+                        disabled={cancelTask.isPending}
+                        onClick={() => cancelTask.mutate(task.id)}
+                      >
                         <X size={16} />
                       </button>
                     ) : null}
                     {task.state === "failed" || task.state === "cancelled" ? (
-                      <button className="icon-button" title="Retry task" onClick={() => retryTask.mutate(task.id)}>
+                      <button
+                        className="icon-button"
+                        title="Retry task"
+                        disabled={retryTask.isPending}
+                        onClick={() => retryTask.mutate(task.id)}
+                      >
                         <RotateCcw size={16} />
                       </button>
                     ) : null}
@@ -264,6 +348,17 @@ export function JobsPage() {
       </div>
     </section>
   );
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error ?? "Unknown error");
+}
+
+function isDegradedRun(task: TaskInfo): boolean {
+  const load = task.latest_run?.computational_load ?? {};
+  const stats = task.latest_run?.stats ?? {};
+  return Boolean(load.degraded || stats.degraded || Number(load.vision_fallbacks ?? stats.vision_fallbacks ?? 0) > 0);
 }
 
 function QueueSummary({ title, counts }: { title: string; counts?: Record<string, number> }) {
@@ -295,13 +390,18 @@ function formatDuration(value?: number | null) {
 function formatLoad(task: TaskInfo) {
   const load = task.latest_run?.computational_load ?? {};
   if (task.pipeline_stage === "index_photos") {
-    return `${load.images_captioned ?? 0} imgs · ${load.total_vectors_written ?? 0} vec`;
+    const fallbacks = Number(load.vision_fallbacks ?? 0);
+    const suffix = fallbacks > 0 ? ` · ${fallbacks} fallback` : "";
+    return `${load.images_captioned ?? 0} imgs · ${load.total_vectors_written ?? 0} vec${suffix}`;
   }
   if (task.pipeline_stage === "index_documents") {
     return `${load.documents_indexed ?? 0} docs · ${load.documents_skipped ?? 0} skip`;
   }
   if (task.pipeline_stage === "index_faces") {
     return `${load.faces_detected ?? 0} faces · ${load.clusters_created ?? 0} clusters`;
+  }
+  if (task.pipeline_stage === "refresh_person_vectors") {
+    return `${load.photos_refreshed ?? 0} imgs · ${load.text_vectors_written ?? 0} vec`;
   }
   return "-";
 }

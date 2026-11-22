@@ -1,0 +1,5 @@
+id = "0012-phase1-reliability-observability"
+title = "Phase 1 EXIF orientation, real observability, retry cooldowns, and ingestion benchmark"
+status = "implemented"
+components = ["backend", "frontend"]
+requirements = ["EXIF-1", "OBS-1", "RETRY-1", "INGEST-BENCH-1"]

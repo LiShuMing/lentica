@@ -46,3 +46,7 @@ verification.md together. An evidence-only or template-only edit does not pass.
 - [0011: Review reliability](0011-review-reliability/README.md): strict queue
   settings validation, explicit face-job unavailability failure, notebook spec
   governance, and operational guidance.
+- [0012: Phase 1 reliability and observability](0012-phase1-reliability-observability/README.md):
+  nested EXIF/GPS and orientation consistency, actual vector/call/timing
+  reporting, UI error/degraded states, retry cooldowns, and offline ingestion
+  benchmark harness.

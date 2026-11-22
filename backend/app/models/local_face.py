@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.core.config import env_bool
+from backend.app.ingestion.images import open_oriented_image
 
 class FaceRuntimeUnavailable(RuntimeError):
     pass
@@ -35,20 +36,15 @@ class InsightFaceDetector:
     def detect(self, image_path: Path) -> list[FaceObservation]:
         try:
             import numpy as np
-            from PIL import Image
         except Exception as exc:  # noqa: BLE001
             raise FaceRuntimeUnavailable("Install numpy and pillow to enable face indexing.") from exc
 
         try:
-            import pillow_heif
-
-            pillow_heif.register_heif_opener()
-        except Exception:
-            pass
-
-        with Image.open(image_path) as image:
-            rgb = image.convert("RGB")
-            array = np.asarray(rgb)[:, :, ::-1]
+            with open_oriented_image(image_path) as image:
+                rgb = image.convert("RGB")
+                array = np.asarray(rgb)[:, :, ::-1]
+        except ImportError as exc:
+            raise FaceRuntimeUnavailable("Install numpy and pillow to enable face indexing.") from exc
         faces = self.app.get(array)
         observations: list[FaceObservation] = []
         for face in faces:

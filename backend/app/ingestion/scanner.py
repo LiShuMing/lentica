@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -33,14 +33,23 @@ def ensure_default_sources(db: Session, commit=None) -> None:
     (commit or db.commit)()
 
 
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_COOLDOWN_SECONDS = 300
+
+
 def scan_documents(
     db: Session,
     source_id: int | None = None,
     max_files: int | None = 100,
     max_bytes: int = 20 * 1024 * 1024,
     commit=None,
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_cooldown_seconds: int = DEFAULT_RETRY_COOLDOWN_SECONDS,
+    now: datetime | None = None,
 ) -> IngestionJob:
     commit = commit or db.commit
+    current_time = now or datetime.utcnow()
     ensure_default_sources(db, commit=commit)
     job = IngestionJob(status="running")
     db.add(job)
@@ -71,7 +80,15 @@ def scan_documents(
                     job.total_files += 1
                     try:
                         if path.stat().st_size <= max_bytes:
-                            _index_one_file(db, source, path, job)
+                            _index_one_file(
+                                db,
+                                source,
+                                path,
+                                job,
+                                max_retries=max_retries,
+                                retry_cooldown_seconds=retry_cooldown_seconds,
+                                now=current_time,
+                            )
                         else:
                             job.skipped_files += 1
                     except OSError as exc:
@@ -118,13 +135,42 @@ def _iter_supported_files(root: Path, max_bytes: int):
             yield path
 
 
-def _index_one_file(db: Session, source: Source, path: Path, job: IngestionJob) -> None:
+def _should_skip_failed_file(
+    file: File | None,
+    digest: str,
+    *,
+    max_retries: int,
+    now: datetime,
+) -> bool:
+    """Skip unchanged failing files while in cooldown or after exhausting retries."""
+    if not file or file.ingestion_status != "failed" or file.sha256 != digest:
+        return False
+    failures = int(file.failure_count or 0)
+    if failures >= max_retries:
+        return True
+    return file.next_retry_at is not None and file.next_retry_at > now
+
+
+def _index_one_file(
+    db: Session,
+    source: Source,
+    path: Path,
+    job: IngestionJob,
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_cooldown_seconds: int = DEFAULT_RETRY_COOLDOWN_SECONDS,
+    now: datetime | None = None,
+) -> None:
+    current_time = now or datetime.utcnow()
     stat = path.stat()
     digest = sha256_file(path)
     file = db.scalar(select(File).where(File.canonical_path == str(path)))
     modified = datetime.fromtimestamp(stat.st_mtime)
 
     if file and file.sha256 == digest and file.ingestion_status == "indexed":
+        job.skipped_files += 1
+        return
+    if _should_skip_failed_file(file, digest, max_retries=max_retries, now=current_time):
         job.skipped_files += 1
         return
 
@@ -137,6 +183,9 @@ def _index_one_file(db: Session, source: Source, path: Path, job: IngestionJob) 
         )
         db.add(file)
         db.flush()
+    elif file.sha256 != digest:
+        file.failure_count = 0
+        file.next_retry_at = None
 
     file.byte_size = stat.st_size
     file.modified_time = modified
@@ -167,8 +216,14 @@ def _index_one_file(db: Session, source: Source, path: Path, job: IngestionJob) 
                 )
             )
         file.ingestion_status = "indexed"
+        file.failure_count = 0
+        file.next_retry_at = None
         job.indexed_files += 1
     except Exception as exc:  # noqa: BLE001
+        failures = int(file.failure_count or 0) + 1
         file.ingestion_status = "failed"
         file.error = str(exc)
+        file.failure_count = failures
+        backoff = max(0, retry_cooldown_seconds) * (2 ** (failures - 1))
+        file.next_retry_at = current_time + timedelta(seconds=backoff) if backoff > 0 else None
         job.failed_files += 1

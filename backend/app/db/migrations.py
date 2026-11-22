@@ -44,3 +44,16 @@ def migrate_consistency(conn) -> None:
     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_processing_tasks_request_key ON processing_tasks(request_key)")
     install_task_constraints(None, conn)
     conn.exec_driver_sql("INSERT INTO schema_migrations(version) VALUES (2)")
+
+
+def migrate_ingestion_reliability(conn) -> None:
+    """Add per-file failure counters and retry cooldown columns without rebuilding indexes."""
+    conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)")
+    if conn.exec_driver_sql("SELECT 1 FROM schema_migrations WHERE version = 3").first():
+        return
+    existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(files)")}
+    if existing:
+        for name, kind in (("failure_count", "INTEGER DEFAULT 0"), ("next_retry_at", "DATETIME")):
+            if name not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE files ADD COLUMN {name} {kind}")
+    conn.exec_driver_sql("INSERT INTO schema_migrations(version) VALUES (3)")

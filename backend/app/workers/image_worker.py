@@ -10,7 +10,7 @@ import signal
 import threading
 import uuid
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -62,6 +62,10 @@ FALLBACK_BGE_MODEL = "BAAI/bge-small-zh-v1.5"
 PHOTO_CONTEXT_VERSION = "photo_context"
 
 
+DEFAULT_PHOTO_MAX_RETRIES = 3
+DEFAULT_PHOTO_RETRY_COOLDOWN_SECONDS = 300
+
+
 @dataclass
 class IndexStats:
     scanned: int = 0
@@ -72,7 +76,20 @@ class IndexStats:
     face_clusters_created: int = 0
     face_unavailable: int = 0
     vectors_written: int = 0
+    image_vectors_written: int = 0
+    text_vectors_written: int = 0
+    vision_calls: int = 0
+    vision_fallbacks: int = 0
+    image_embed_calls: int = 0
+    text_embed_calls: int = 0
+    face_calls: int = 0
+    cooldown_skipped: int = 0
     metadata_backfilled: int = 0
+    degraded: bool = False
+    stage_timings_ms: dict[str, float] = field(default_factory=dict)
+
+    def add_timing(self, stage: str, elapsed_seconds: float) -> None:
+        self.stage_timings_ms[stage] = round(self.stage_timings_ms.get(stage, 0.0) + elapsed_seconds * 1000.0, 3)
 
 
 class ModelManager:
@@ -289,6 +306,9 @@ class ImageWorker:
         max_pixels = int(payload.get("max_pixels", 768 * 768))
         unindexed_only = bool(payload.get("unindexed_only", True))
         target_path = str(payload.get("target_path") or "")
+        max_retries = max(1, int(payload.get("max_retries", DEFAULT_PHOTO_MAX_RETRIES)))
+        retry_cooldown_seconds = max(0, int(payload.get("retry_cooldown_seconds", DEFAULT_PHOTO_RETRY_COOLDOWN_SECONDS)))
+        current_time = datetime.utcnow()
 
         self._commit(db)  # Release the payload read snapshot before loading models.
         vision_client = self.models.vision_client(
@@ -331,9 +351,16 @@ class ImageWorker:
                 break
             item_started = time.monotonic()
             stats.scanned += 1
+            meta = None
             try:
                 existing = db.scalar(select(File).where(File.canonical_path == str(image_path)))
+                if not force and _photo_in_cooldown(existing, image_path, max_retries=max_retries, now=current_time):
+                    stats.skipped += 1
+                    stats.cooldown_skipped += 1
+                    continue
+                t0 = time.perf_counter()
                 meta = inspect_image(image_path)
+                stats.add_timing("inspect_exif_ms", time.perf_counter() - t0)
                 file = existing
                 if (
                     file
@@ -360,18 +387,30 @@ class ImageWorker:
                     continue
 
                 self._commit(db)  # Keep slow vision requests outside a read transaction.
+                t0 = time.perf_counter()
                 thumb = make_thumbnail(image_path, thumb_dir)
+                stats.add_timing("thumbnail_ms", time.perf_counter() - t0)
+                t0 = time.perf_counter()
                 analysis = vision_client.analyze_photo(image_path)
+                stats.add_timing("vision_ms", time.perf_counter() - t0)
+                stats.vision_calls += 1
+                if getattr(vision_client, "last_used_fallback", False):
+                    stats.vision_fallbacks += 1
+                    stats.degraded = True
                 context = _normalize_context(analysis)
                 caption = str(context.get("caption") or "")
                 tags = list(context.get("tags") or [])
                 ocr_text = str(context.get("ocr_text") or context.get("text_in_image") or "")
                 file = _upsert_image_file(db, source, image_path, meta)
                 _upsert_image_context(db, file, meta, thumb, context)
+                t0 = time.perf_counter()
                 face_stats = self.models.face_indexer().index_photo(db, file, image_path, force=force)
+                stats.add_timing("face_ms", time.perf_counter() - t0)
                 stats.faces += face_stats.faces
                 stats.face_clusters_created += face_stats.clusters_created
                 stats.face_unavailable += 1 if face_stats.unavailable else 0
+                if not face_stats.unavailable:
+                    stats.face_calls += 1
                 if face_stats.faces:
                     _attach_people_context(db, file, context)
                 _attach_metadata_context(db, file, meta, context)
@@ -379,7 +418,10 @@ class ImageWorker:
                 image.index_profile = _index_profile(payload)
                 # Replace the complete vector set in the same transaction as the context.
                 db.execute(delete(PhotoVector).where(PhotoVector.file_id == file.id))
+                t0 = time.perf_counter()
                 image_vector = image_embedder.embed_image(image_path, caption=caption)
+                stats.add_timing("image_embed_ms", time.perf_counter() - t0)
+                stats.image_embed_calls += 1
                 upsert_photo_vector(
                     db,
                     file.id,
@@ -387,21 +429,31 @@ class ImageWorker:
                     image_vector,
                     encoder_id=image_embedder.encoder_id,
                 )
+                stats.image_vectors_written += 1
+                stats.vectors_written += 1
                 texts = {
                     name: value
                     for name, value in _context_vector_texts(context, image_path, meta).items()
                     if value.strip()
                 }
-                vectors = text_embedder.embed_texts(list(texts.values()))
-                for namespace, vector in zip(texts, vectors):
-                    upsert_photo_vector(
-                        db,
-                        file.id,
-                        _vector_namespace(actual_text_embedder_kind, namespace),
-                        vector,
-                        encoder_id=text_embedder.encoder_id,
-                    )
+                if texts:
+                    t0 = time.perf_counter()
+                    vectors = text_embedder.embed_texts(list(texts.values()))
+                    stats.add_timing("text_embed_ms", time.perf_counter() - t0)
+                    stats.text_embed_calls += 1
+                    for namespace, vector in zip(texts, vectors):
+                        upsert_photo_vector(
+                            db,
+                            file.id,
+                            _vector_namespace(actual_text_embedder_kind, namespace),
+                            vector,
+                            encoder_id=text_embedder.encoder_id,
+                        )
+                        stats.text_vectors_written += 1
+                        stats.vectors_written += 1
+                t0 = time.perf_counter()
                 self._commit(db)
+                stats.add_timing("db_commit_ms", time.perf_counter() - t0)
                 stats.indexed += 1
                 self.logger.info(
                     "image_indexed scanned=%d indexed=%d skipped=%d failed=%d elapsed=%.2fs file_id=%d path=%s",
@@ -418,6 +470,16 @@ class ImageWorker:
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
                 stats.failed += 1
+                _record_photo_failure(
+                    db,
+                    source,
+                    image_path,
+                    exc,
+                    meta=meta,
+                    retry_cooldown_seconds=retry_cooldown_seconds,
+                    now=current_time,
+                    commit=lambda: self._commit(db),
+                )
                 self.logger.exception(
                     "image_failed scanned=%d indexed=%d skipped=%d failed=%d elapsed=%.2fs path=%s error=%r",
                     stats.scanned,
@@ -529,6 +591,8 @@ class ImageWorker:
                         text_embedder.embed_text(text),
                         encoder_id=text_embedder.encoder_id,
                     )
+                    stats.text_embed_calls += 1
+                    stats.text_vectors_written += 1
                     stats.vectors_written += 1
                 self._commit(db)
                 stats.indexed += 1
@@ -692,9 +756,80 @@ def _first_unindexed_face(db) -> int | None:
     )
 
 
+def _photo_in_cooldown(
+    file: File | None,
+    image_path: Path,
+    *,
+    max_retries: int = DEFAULT_PHOTO_MAX_RETRIES,
+    now: datetime | None = None,
+) -> bool:
+    """Skip failed photos still within cooldown or past retry budget unless bytes changed."""
+    if not file or file.ingestion_status != "failed":
+        return False
+    current_time = now or datetime.utcnow()
+    failures = int(file.failure_count or 0)
+    in_window = failures >= max_retries or (file.next_retry_at is not None and file.next_retry_at > current_time)
+    if not in_window:
+        return False
+    try:
+        current_sha = sha256_file(image_path)
+    except OSError:
+        return True
+    if file.sha256 and file.sha256 != current_sha:
+        return False
+    return True
+
+
+def _record_photo_failure(
+    db,
+    source: Source,
+    image_path: Path,
+    exc: Exception,
+    *,
+    meta=None,
+    retry_cooldown_seconds: int = DEFAULT_PHOTO_RETRY_COOLDOWN_SECONDS,
+    now: datetime | None = None,
+    commit=None,
+) -> None:
+    """Persist per-file photo failure count and cooldown without blocking other files."""
+    current_time = now or datetime.utcnow()
+    file = db.scalar(select(File).where(File.canonical_path == str(image_path)))
+    sha = meta.sha256 if meta is not None else None
+    size = meta.size_bytes if meta is not None else 0
+    if sha is None:
+        try:
+            sha = sha256_file(image_path)
+            size = image_path.stat().st_size
+        except OSError:
+            sha = file.sha256 if file else None
+    if not file:
+        file = File(
+            source_id=source.id,
+            canonical_path=str(image_path),
+            windows_path=to_windows_path(image_path),
+            file_type=image_path.suffix.lower().lstrip("."),
+        )
+        db.add(file)
+        db.flush()
+    failures = int(file.failure_count or 0) + 1
+    file.source_id = source.id
+    file.byte_size = size or file.byte_size
+    file.sha256 = sha
+    file.ingestion_status = "failed"
+    file.error = repr(exc)
+    file.failure_count = failures
+    backoff = max(0, retry_cooldown_seconds) * (2 ** (failures - 1))
+    file.next_retry_at = current_time + timedelta(seconds=backoff) if backoff > 0 else None
+    file.updated_at = current_time
+    (commit or db.commit)()
+
+
 def _first_unindexed_image(db, root: Path, probe_limit: int = 1000, payload: dict | None = None) -> Path | None:
     source = _ensure_photo_source(db, root)
     cursor = scan_cursor(db, source.id, "photos")
+    max_retries = max(1, int((payload or {}).get("max_retries", DEFAULT_PHOTO_MAX_RETRIES)))
+    force = bool((payload or {}).get("force", False))
+    current_time = datetime.utcnow()
     scanned = 0
     for image_path in iter_source_files(root, SUPPORTED_IMAGES, after=cursor.path):
         if scanned >= max(1, probe_limit):
@@ -703,6 +838,8 @@ def _first_unindexed_image(db, root: Path, probe_limit: int = 1000, payload: dic
         scanned += 1
         cursor.path = str(image_path)
         file = db.scalar(select(File).where(File.canonical_path == str(image_path)))
+        if not force and _photo_in_cooldown(file, image_path, max_retries=max_retries, now=current_time):
+            continue
         if (
             not file
             or file.ingestion_status != "indexed"
@@ -759,6 +896,8 @@ def _upsert_image_file(db, source: Source, image_path: Path, meta) -> File:
     file.sha256 = meta.sha256
     file.ingestion_status = "indexed"
     file.error = None
+    file.failure_count = 0
+    file.next_retry_at = None
     file.updated_at = datetime.utcnow()
     return file
 

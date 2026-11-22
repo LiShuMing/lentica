@@ -43,7 +43,7 @@ def init_db() -> None:
 
 
 def _ensure_lightweight_migrations() -> None:
-    from backend.app.db.migrations import migrate_consistency
+    from backend.app.db.migrations import migrate_consistency, migrate_ingestion_reliability
 
     image_columns = {
         "width": "INTEGER",
@@ -59,6 +59,7 @@ def _ensure_lightweight_migrations() -> None:
     }
     with engine.begin() as conn:
         migrate_consistency(conn)
+        migrate_ingestion_reliability(conn)
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
         for name, ddl_type in image_columns.items():
             if name not in existing:

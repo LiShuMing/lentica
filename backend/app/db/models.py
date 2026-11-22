@@ -49,6 +49,8 @@ class File(Base):
     sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     ingestion_status: Mapped[str] = mapped_column(String(40), default="pending")
     error: Mapped[str | None] = mapped_column(Text)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

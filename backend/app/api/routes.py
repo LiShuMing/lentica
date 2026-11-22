@@ -54,6 +54,7 @@ from backend.app.db.models import (
 )
 from backend.app.db.session import get_db
 from backend.app.ingestion.faces import refresh_people_context_for_cluster
+from backend.app.ingestion.images import open_oriented_image
 from backend.app.ingestion.scanner import ensure_default_sources, scan_documents
 from backend.app.llm.client import LocalAnswerer
 from backend.app.models.local_clip import Embedder, build_embedder
@@ -303,18 +304,27 @@ def list_tasks(limit: int = 50, db: Session = Depends(get_db)) -> list[TaskInfo]
 
 @router.get("/api/queue/status", response_model=QueueStatusResponse)
 def queue_status() -> QueueStatusResponse:
-    return QueueStatusResponse(**queue_controller.status())
+    try:
+        return QueueStatusResponse(**queue_controller.status())
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.put("/api/queue/settings", response_model=QueueStatusResponse)
 def update_queue_settings(request: QueueSettingsUpdate) -> QueueStatusResponse:
-    queue_controller.update_settings(request.model_dump(exclude_unset=True))
-    return QueueStatusResponse(**queue_controller.status())
+    try:
+        queue_controller.update_settings(request.model_dump(exclude_unset=True))
+        return QueueStatusResponse(**queue_controller.status())
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/api/vision/status", response_model=VisionStatusResponse)
 def vision_status() -> VisionStatusResponse:
-    settings = queue_controller.settings()
+    try:
+        settings = queue_controller.settings()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if settings.vision_backend == "vllm":
         status = get_vision_service_status(
             settings.vision_endpoint,
@@ -424,19 +434,10 @@ def face_thumbnail(face_id: int, db: Session = Depends(get_db)) -> StreamingResp
     if not file:
         raise HTTPException(status_code=404, detail="Source image not found")
     try:
-        from PIL import Image as PilImage
-
-        try:
-            import pillow_heif
-
-            pillow_heif.register_heif_opener()
-        except Exception:
-            pass
-
         bbox = _parse_float_list(face.bbox_json)
         if len(bbox) != 4:
             raise ValueError("Invalid face bbox")
-        with PilImage.open(file.canonical_path) as image:
+        with open_oriented_image(Path(file.canonical_path)) as image:
             left, top, right, bottom = bbox
             pad_x = (right - left) * 0.22
             pad_y = (bottom - top) * 0.30
@@ -668,13 +669,27 @@ def _computational_load(stage: str, stats: dict[str, object]) -> dict[str, objec
     if stage == "index_photos":
         indexed = int(stats.get("indexed", 0) or 0)
         scanned = int(stats.get("scanned", 0) or 0)
+        image_vectors = int(stats.get("image_vectors_written", 0) or 0)
+        text_vectors = int(stats.get("text_vectors_written", 0) or 0)
+        total_vectors = int(stats.get("vectors_written", image_vectors + text_vectors) or 0)
+        vision_calls = int(stats.get("vision_calls", 0) or 0)
+        vision_fallbacks = int(stats.get("vision_fallbacks", 0) or 0)
+        stage_timings = stats.get("stage_timings_ms")
         return {
             "source_items_scanned": scanned,
-            "images_captioned": indexed,
+            "images_captioned": vision_calls if "vision_calls" in stats else indexed,
+            "vision_calls": vision_calls,
+            "vision_fallbacks": vision_fallbacks,
+            "image_embed_calls": int(stats.get("image_embed_calls", 0) or 0),
+            "text_embed_calls": int(stats.get("text_embed_calls", 0) or 0),
+            "face_calls": int(stats.get("face_calls", 0) or 0),
             "metadata_backfilled": int(stats.get("metadata_backfilled", 0) or 0),
-            "image_vectors_written": indexed,
-            "text_vectors_written": indexed,
-            "total_vectors_written": indexed * 2,
+            "cooldown_skipped": int(stats.get("cooldown_skipped", 0) or 0),
+            "image_vectors_written": image_vectors,
+            "text_vectors_written": text_vectors,
+            "total_vectors_written": total_vectors,
+            "degraded": bool(stats.get("degraded", False) or vision_fallbacks > 0),
+            "stage_timings_ms": stage_timings if isinstance(stage_timings, dict) else {},
         }
     if stage == "index_documents":
         total = int(stats.get("total_files", 0) or 0)
